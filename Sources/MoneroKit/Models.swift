@@ -43,15 +43,15 @@ public struct TransactionInfo {
 }
 
 public struct BalanceInfo: Equatable {
-    public let spendable: Int
+    public let all: Int
     public let unspendable: Int
 
-    public init(spendable: UInt64, unspendable: UInt64) {
-        self.spendable = Int(spendable)
+    public init(all: UInt64, unspendable: UInt64) {
+        self.all = Int(all)
         self.unspendable = Int(unspendable)
     }
 
     public static func == (lhs: BalanceInfo, rhs: BalanceInfo) -> Bool {
-        lhs.spendable == rhs.spendable && lhs.unspendable == rhs.unspendable
+        lhs.all == rhs.all && lhs.unspendable == rhs.unspendable
     }
 }

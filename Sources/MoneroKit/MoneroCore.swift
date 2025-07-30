@@ -41,9 +41,9 @@ class MoneroCore {
         }
     }
 
-    var balance: BalanceInfo = .init(spendable: 0, unspendable: 0) {
+    var balance: BalanceInfo = .init(all: 0, unspendable: 0) {
         didSet {
-            if oldValue.spendable != balance.spendable || oldValue.unspendable != balance.unspendable {
+            if oldValue.all != balance.all || oldValue.unspendable != balance.unspendable {
                 delegate?.balanceDidChange(balanceInfo: balance)
             }
         }
@@ -212,8 +212,6 @@ class MoneroCore {
         guard let cWalletPath, let walletPointer else { return }
 
         let backgroundSyncSetupSuccess = MONERO_Wallet_setupBackgroundSync(walletPointer, BackgroundSyncType.customPassword.rawValue, cWalletPassword, "")
-        print("Wallet path is: \(String(cString: cWalletPath))")
-        print("Wallet password is: \(cWalletPassword.map { String(cString: $0) } ?? "no password")")
 
         if !backgroundSyncSetupSuccess {
             let errorCStr = MONERO_Wallet_errorString(walletPointer)
@@ -253,15 +251,14 @@ class MoneroCore {
         let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
         let newWalletStatus = MONERO_Wallet_status(walletPtr)
         let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
-        let spendable = MONERO_Wallet_balance(walletPtr, 0)
+        let allBalance = MONERO_Wallet_balance(walletPtr, 0)
         let unspendable = MONERO_Wallet_unlockedBalance(walletPtr, 0)
 
         daemonHeight = newDaemonHeight
         walletHeight = newWalletHeight
         walletStatus = newWalletStatus
         isSynchronized = newIsSynchronized
-        print("Spendable: \(spendable); Unspendable: \(unspendable)")
-        balance = BalanceInfo(spendable: spendable, unspendable: unspendable)
+        balance = BalanceInfo(all: allBalance, unspendable: unspendable)
 
         self.lastBlockHeight = newWalletHeight
         delegate?.lastBlockHeightDidChange(height: newWalletHeight)
@@ -275,10 +272,10 @@ class MoneroCore {
             let errorCStr = MONERO_Wallet_errorString(walletPtr)
             print("Wallet is in error state (\(newWalletStatus)): \(stringFromCString(errorCStr) ?? "Unknown wallet error").")
         } else if newIsSynchronized {
-            _ = MONERO_Wallet_store(walletPtr, cWalletPath)
             stop()
             fetchSubaddresses()
             fetchTransactions()
+            _ = MONERO_Wallet_store(walletPtr, cWalletPath)
         }
     }
 
