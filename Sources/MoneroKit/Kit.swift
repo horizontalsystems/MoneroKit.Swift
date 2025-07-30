@@ -40,6 +40,10 @@ public class Kit {
         moneroCore.isSynchronized
     }
 
+    public var walletStatus: WalletStatus {
+        moneroCore.walletStatus
+    }
+
     public var receiveAddress: String {
         moneroCore.receiveAddress
     }
@@ -116,7 +120,11 @@ extension Kit: MoneroCoreDelegate {
         let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0) }
         delegate?.transactionsUpdated(inserted: [], updated: transactionInfos)
     }
-    
+
+    func walletStatusDidChange(status: WalletStatus) {
+        delegate?.walletStatusDidChange(status: status)
+    }
+
     func syncStateDidChange(isSynchronized: Bool) {
         delegate?.syncStateDidChange(isSynchronized: isSynchronized)
     }

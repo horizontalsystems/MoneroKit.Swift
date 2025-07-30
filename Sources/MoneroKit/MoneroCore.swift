@@ -1,6 +1,23 @@
 import CMonero
 import Foundation
 
+public enum WalletStatus {
+    case unknown, ok, error(Error?), critical(Error?)
+
+    init?(_ status: Int32, error: String?) {
+        switch status {
+            case 0:
+                self = .ok
+            case 1:
+                self = .error(MoneroCoreError.walletStatusError(error))
+            case 2:
+                self = .critical(MoneroCoreError.walletStatusError(error))
+            default:
+                return nil
+        }
+    }
+}
+
 class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
 
@@ -8,9 +25,6 @@ class MoneroCore {
     private var walletPointer: UnsafeMutableRawPointer?
     private var walletListenerPointer: UnsafeMutableRawPointer?
     private var refreshTimer: Timer?
-
-    private var walletHeight: UInt64 = 0
-    private var walletStatus: Int32 = -1
 
     private var transactions: [Transaction] = [] {
         didSet {
@@ -33,6 +47,16 @@ class MoneroCore {
 
     var daemonHeight: UInt64? = nil
     var lastBlockHeight: UInt64? = nil
+    var walletStatus: WalletStatus = .unknown {
+        didSet {
+            switch (oldValue, walletStatus) {
+                case (.unknown, .unknown), (.ok, .ok), (.error, .error), (.critical, .critical): ()
+                default:
+                    delegate?.walletStatusDidChange(status: walletStatus)
+            }
+        }
+    }
+
     var isSynchronized: Bool = false {
         didSet {
             if oldValue != isSynchronized {
@@ -249,33 +273,34 @@ class MoneroCore {
 
         let newDaemonHeight = MONERO_Wallet_daemonBlockChainHeight(walletPtr)
         let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
-        let newWalletStatus = MONERO_Wallet_status(walletPtr)
         let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
         let allBalance = MONERO_Wallet_balance(walletPtr, 0)
         let unspendable = MONERO_Wallet_unlockedBalance(walletPtr, 0)
-
-        daemonHeight = newDaemonHeight
-        walletHeight = newWalletHeight
-        walletStatus = newWalletStatus
-        isSynchronized = newIsSynchronized
-        balance = BalanceInfo(all: allBalance, unspendable: unspendable)
-
-        self.lastBlockHeight = newWalletHeight
-        delegate?.lastBlockHeightDidChange(height: newWalletHeight)
+        let newWalletStatus = MONERO_Wallet_status(walletPtr)
 
         if let listenerPtr = walletListenerPointer, MONERO_cw_WalletListener_isNeedToRefresh(listenerPtr) {
             MONERO_Wallet_refresh(walletPtr)
             MONERO_cw_WalletListener_resetNeedToRefresh(listenerPtr)
         }
 
+        daemonHeight = newDaemonHeight
+        isSynchronized = newIsSynchronized
+        balance = BalanceInfo(all: allBalance, unspendable: unspendable)
+
+        self.lastBlockHeight = newWalletHeight
+        delegate?.lastBlockHeightDidChange(height: newWalletHeight)
+
         if newWalletStatus != 0 {
             let errorCStr = MONERO_Wallet_errorString(walletPtr)
-            print("Wallet is in error state (\(newWalletStatus)): \(stringFromCString(errorCStr) ?? "Unknown wallet error").")
+            let errorStr = stringFromCString(errorCStr)
+            print("Wallet is in error state (\(newWalletStatus)): \(errorStr ?? "Unknown wallet error").")
+            walletStatus = WalletStatus(newWalletStatus, error: errorStr) ?? .unknown
         } else if newIsSynchronized {
             stop()
             fetchSubaddresses()
             fetchTransactions()
             _ = MONERO_Wallet_store(walletPtr, cWalletPath)
+            walletStatus = .ok
         }
     }
 
@@ -339,7 +364,7 @@ class MoneroCore {
 
     func send(to address: String, amount: Int) throws {
         guard let walletPtr = walletPointer else {
-            throw SendError.walletNotInitialized
+            throw MoneroCoreError.walletNotInitialized
         }
 
         let cAddress = (address as NSString).utf8String
@@ -350,15 +375,15 @@ class MoneroCore {
             if status == 0 {
                 if !MONERO_PendingTransaction_commit(txPtr, "", false) {
                     let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown commit error"
-                    throw SendError.commitFailed(error)
+                    throw MoneroCoreError.commitFailed(error)
                 }
             } else {
                 let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown pending transaction error"
-                throw SendError.creationFailed(error)
+                throw MoneroCoreError.creationFailed(error)
             }
         } else {
             let error = stringFromCString(MONERO_Wallet_errorString(walletPtr)) ?? "Unknown transaction creation error"
-            throw SendError.creationFailed(error)
+            throw MoneroCoreError.creationFailed(error)
         }
     }
 
@@ -388,9 +413,11 @@ class MoneroCore {
         return stringFromCString(MONERO_Wallet_address(walletPtr, 0, 0)) ?? ""
     }
 
-    enum SendError: Error {
-        case walletNotInitialized
-        case creationFailed(String)
-        case commitFailed(String)
-    }
+}
+
+public enum MoneroCoreError: Error {
+    case walletNotInitialized
+    case creationFailed(String)
+    case commitFailed(String)
+    case walletStatusError(String?)
 }
