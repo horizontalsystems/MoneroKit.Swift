@@ -2,7 +2,7 @@ import CMonero
 import Foundation
 
 class MoneroCore {
-    weak var delegate: MoneroKitDelegate?
+    weak var delegate: MoneroCoreDelegate?
 
     private var walletManagerPointer: UnsafeMutableRawPointer?
     private var walletPointer: UnsafeMutableRawPointer?
@@ -10,27 +10,17 @@ class MoneroCore {
     private var refreshTimer: Timer?
 
     private var walletHeight: UInt64 = 0
-    private var daemonHeight: UInt64 = 0
     private var walletStatus: Int32 = -1
-    private var isSynchronized: Bool = false {
-        didSet {
-            if oldValue != isSynchronized {
-                delegate?.syncStateDidChange(isSynchronized: isSynchronized)
-            }
-        }
-    }
 
-    private var balance: BalanceInfo = .init(spendable: 0, unspendable: 0) {
-        didSet {
-            if oldValue.spendable != balance.spendable || oldValue.unspendable != balance.unspendable {
-                delegate?.balanceDidChange(balance: balance)
-            }
-        }
-    }
-
-    private var transactions: [TransactionInfo] = [] {
+    private var transactions: [Transaction] = [] {
         didSet {
             delegate?.transactionsDidChange(transactions: transactions)
+        }
+    }
+
+    private var subAddresses: [String] = [] {
+        didSet {
+            delegate?.subAddresssesDidChange(subAddresses: subAddresses)
         }
     }
 
@@ -41,10 +31,46 @@ class MoneroCore {
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
     private var cDaemonAddress: UnsafeMutablePointer<CChar>?
 
+    var daemonHeight: UInt64? = nil
+    var lastBlockHeight: UInt64? = nil
+    var isSynchronized: Bool = false {
+        didSet {
+            if oldValue != isSynchronized {
+                delegate?.syncStateDidChange(isSynchronized: isSynchronized)
+            }
+        }
+    }
+
+    var balance: BalanceInfo = .init(spendable: 0, unspendable: 0) {
+        didSet {
+            if oldValue.spendable != balance.spendable || oldValue.unspendable != balance.unspendable {
+                delegate?.balanceDidChange(balanceInfo: balance)
+            }
+        }
+    }
+
     enum BackgroundSyncType: Int32 {
         case none = 0
         case `default` = 1
         case customPassword = 2
+    }
+
+    struct Transaction {
+        public enum Direction: Int32 {
+            case `in` = 0
+            case out = 1
+        }
+
+        let direction: Direction
+        let isPending: Bool
+        let isFailed: Bool
+        let amount: UInt64
+        let fee: UInt64
+        let blockHeight: UInt64
+        let confirmations: UInt64
+        let hash: String
+        let timestamp: Date
+        var transfers: [Transfer]
     }
 
     init(mnemonic: MoneroMnemonic, walletPath: String, walletPassword: String, daemonAddress: String, restoreHeight: UInt64, networkType: NetworkType) {
@@ -67,27 +93,44 @@ class MoneroCore {
         if let ptr = cDaemonAddress { free(ptr) }
     }
 
+    func close() {
+        if let walletPtr = walletPointer {
+            MONERO_WalletManager_closeWallet(walletManagerPointer, walletPtr, false)
+            walletPointer = nil
+        }
+    }
+
     func start() throws {
         guard walletManagerPointer != nil else {
             print("Error: Could not get WalletManager instance.")
             return
         }
 
-        MONERO_WalletManagerFactory_setLogLevel(4)
+        if walletPointer == nil {
+            try openWallet()
+        }
 
-        try openWallet()
+        startBackgroundSync()
     }
 
     func stop() {
-        if let walletPtr = walletPointer {
-            MONERO_WalletManager_closeWallet(walletManagerPointer, walletPtr, false)
-            walletPointer = nil
-        }
         refreshTimer?.invalidate()
         refreshTimer = nil
+
+        if let walletPtr = walletPointer {
+            let stopped = MONERO_Wallet_stopBackgroundSync(walletPtr, cWalletPassword)
+            if !stopped {
+                let errorCStr = MONERO_Wallet_errorString(walletPtr)
+                let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
+                print("Error setup Background sync: \(msg)")
+                return
+            }
+        }
     }
 
     private func openWallet() throws {
+        MONERO_WalletManagerFactory_setLogLevel(4)
+
         guard let walletManagerPointer, let cWalletPath else { return }
 
         let walletExists = MONERO_WalletManager_walletExists(walletManagerPointer, cWalletPath)
@@ -163,28 +206,32 @@ class MoneroCore {
         }
 
         MONERO_Wallet_setTrustedDaemon(walletPtr, true)
+    }
 
-        let backgroundSyncSetupSuccess = MONERO_Wallet_setupBackgroundSync(walletPtr, BackgroundSyncType.customPassword.rawValue, cWalletPassword, "")
+    private func startBackgroundSync() {
+        guard let cWalletPath, let walletPointer else { return }
+
+        let backgroundSyncSetupSuccess = MONERO_Wallet_setupBackgroundSync(walletPointer, BackgroundSyncType.customPassword.rawValue, cWalletPassword, "")
         print("Wallet path is: \(String(cString: cWalletPath))")
         print("Wallet password is: \(cWalletPassword.map { String(cString: $0) } ?? "no password")")
 
         if !backgroundSyncSetupSuccess {
-            let errorCStr = MONERO_Wallet_errorString(walletPtr)
+            let errorCStr = MONERO_Wallet_errorString(walletPointer)
             let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
             print("Error setup Background sync: \(msg)")
             return
         }
 
-        let startedBackgroundSync = MONERO_Wallet_startBackgroundSync(walletPtr)
+        let startedBackgroundSync = MONERO_Wallet_startBackgroundSync(walletPointer)
         if !startedBackgroundSync {
-            let errorCStr = MONERO_Wallet_errorString(walletPtr)
+            let errorCStr = MONERO_Wallet_errorString(walletPointer)
             let msg = stringFromCString(errorCStr) ?? "Start background sync error"
             print("Error start Background sync: \(msg)")
             return
         }
 
-        walletListenerPointer = MONERO_cw_getWalletListener(walletPtr)
-        MONERO_Wallet_startRefresh(walletPtr)
+        walletListenerPointer = MONERO_cw_getWalletListener(walletPointer)
+        MONERO_Wallet_startRefresh(walletPointer)
 
         startRefreshTimer()
     }
@@ -202,19 +249,21 @@ class MoneroCore {
     private func checkWalletStatusAndRefresh() {
         guard let walletPtr = walletPointer else { return }
 
-        let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
         let newDaemonHeight = MONERO_Wallet_daemonBlockChainHeight(walletPtr)
+        let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
         let newWalletStatus = MONERO_Wallet_status(walletPtr)
         let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
         let spendable = MONERO_Wallet_balance(walletPtr, 0)
         let unspendable = MONERO_Wallet_unlockedBalance(walletPtr, 0)
 
-        walletHeight = newWalletHeight
         daemonHeight = newDaemonHeight
+        walletHeight = newWalletHeight
         walletStatus = newWalletStatus
         isSynchronized = newIsSynchronized
+        print("Spendable: \(spendable); Unspendable: \(unspendable)")
         balance = BalanceInfo(spendable: spendable, unspendable: unspendable)
 
+        self.lastBlockHeight = newWalletHeight
         delegate?.lastBlockHeightDidChange(height: newWalletHeight)
 
         if let listenerPtr = walletListenerPointer, MONERO_cw_WalletListener_isNeedToRefresh(listenerPtr) {
@@ -227,30 +276,39 @@ class MoneroCore {
             print("Wallet is in error state (\(newWalletStatus)): \(stringFromCString(errorCStr) ?? "Unknown wallet error").")
         } else if newIsSynchronized {
             _ = MONERO_Wallet_store(walletPtr, cWalletPath)
-            let stopped = MONERO_Wallet_stopBackgroundSync(walletPtr, cWalletPassword)
-            if !stopped {
-                let errorCStr = MONERO_Wallet_errorString(walletPtr)
-                let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
-                print("Error setup Background sync: \(msg)")
-                return
-            }
+            stop()
+            fetchSubaddresses()
             fetchTransactions()
         }
     }
 
-    func fetchTransactions() {
+    public func fetchSubaddresses() {
+        guard let walletPtr = walletPointer else { return }
+        var fetchedAddresses: [String] = []
+        let count = MONERO_Wallet_numSubaddresses(walletPtr, 0)
+
+        for i in 0 ..< count {
+            if let address = stringFromCString(MONERO_Wallet_address(walletPtr, 0, UInt64(i))) {
+                fetchedAddresses.append(address)
+            }
+        }
+
+        self.subAddresses = fetchedAddresses
+    }
+
+    private func fetchTransactions() {
         guard let walletPtr = walletPointer else { return }
 
         let historyPtr = MONERO_Wallet_history(walletPtr)
         MONERO_TransactionHistory_refresh(historyPtr)
 
         let count = MONERO_TransactionHistory_count(historyPtr)
-        var fetchedTransactions: [TransactionInfo] = []
+        var fetchedTransactions: [Transaction] = []
 
         for i in 0 ..< count {
             let txInfoPtr = MONERO_TransactionHistory_transaction(historyPtr, i)
 
-            guard let direction = TransactionInfo.Direction(rawValue: MONERO_TransactionInfo_direction(txInfoPtr)) else { continue }
+            guard let direction = Transaction.Direction(rawValue: MONERO_TransactionInfo_direction(txInfoPtr)) else { continue }
             let hash = stringFromCString(MONERO_TransactionInfo_hash(txInfoPtr)) ?? "N/A"
 
             var transfers: [Transfer] = []
@@ -264,7 +322,7 @@ class MoneroCore {
                 }
             }
 
-            let transaction = TransactionInfo(
+            let transaction = Transaction(
                 direction: direction,
                 isPending: MONERO_TransactionInfo_isPending(txInfoPtr),
                 isFailed: MONERO_TransactionInfo_isFailed(txInfoPtr),
@@ -282,15 +340,13 @@ class MoneroCore {
         transactions = fetchedTransactions.sorted(by: { $0.timestamp > $1.timestamp })
     }
 
-    func send(to address: String, amount: Double) throws {
+    func send(to address: String, amount: Int) throws {
         guard let walletPtr = walletPointer else {
             throw SendError.walletNotInitialized
         }
 
-        let amountValue = amount * 1_000_000_000_000
         let cAddress = (address as NSString).utf8String
-
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", UInt64(amountValue), 0, 0, 0, "", "")
+        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", UInt64(amount), 0, 0, 0, "", "")
 
         if let txPtr = pendingTxPtr {
             let status = MONERO_PendingTransaction_status(txPtr)
@@ -309,12 +365,12 @@ class MoneroCore {
         }
     }
 
-    func estimateFee(amount: Double) -> UInt64 {
+    func estimateFee(amount: Int) -> UInt64 {
         guard let walletPtr = walletPointer else {
             return 0
         }
 
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, "", "", UInt64(amount * 1_000_000_000_000), 0, 0, 0, "", "")
+        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, "", "", UInt64(amount), 0, 0, 0, "", "")
 
         if let txPtr = pendingTxPtr {
             let status = MONERO_PendingTransaction_status(txPtr)
@@ -324,6 +380,10 @@ class MoneroCore {
         }
 
         return 0
+    }
+
+    func validate(address: String) -> Bool {
+        return MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
     }
 
     var receiveAddress: String {

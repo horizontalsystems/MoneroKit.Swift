@@ -2,7 +2,7 @@ import MoneroKit
 import SwiftUI
 
 struct SendView: View {
-    @Binding var moneroKit: MoneroKit?
+    @Binding var moneroKit: Kit?
     @State private var recipientAddress: String = "87mKVhsVc2ETP2g1VCd38mUeKpXkXkPT3B7tQ5aapCc1gNaZZZ5ZkHN5U92pnDom3i7QeJwUqGDCUPv1J51HojY29qZDFaX"
     @State private var amount: String = "0.001"
     @State private var estimatedFee: String?
@@ -23,7 +23,7 @@ struct SendView: View {
                 }
                 Button("Estimate Fee") {
                     if let amountDouble = Double(amount) {
-                        let fee = moneroKit?.estimateFee(amount: amountDouble) ?? 0
+                        let fee = moneroKit?.estimateFee(amount: Int(amountDouble * 1_000_000_000_000)) ?? 0
                         estimatedFee = "\(Double(fee) / 1_000_000_000_000) XMR"
                     }
                 }
@@ -32,7 +32,7 @@ struct SendView: View {
             Button("Confirm & Send") {
                 if let amountDouble = Double(amount) {
                     do {
-                        try moneroKit?.send(to: recipientAddress, amount: amountDouble)
+                        try moneroKit?.send(to: recipientAddress, amount: Int(amountDouble * 1_000_000_000_000))
                         transactionStatus = "Transaction sent!"
                     } catch {
                         transactionStatus = "Error: \(error.localizedDescription)"

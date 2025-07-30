@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var mnemonicSeed: String = ""
     @State private var walletId: String = "wallet1"
     @State private var daemonAddress: String = "xmr-node.cakewallet.com:18081"
-    @State private var restoreHeight: String = "3437500"
+    @State private var restoreHeight: String = "3435000"
 
     var body: some View {
         NavigationView {

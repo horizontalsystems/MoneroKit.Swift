@@ -13,6 +13,7 @@ let package = Package(
         ),
     ],
     dependencies: [
+        .package(url: "https://github.com/groue/GRDB.swift.git", .upToNextMajor(from: "6.0.0")),
         .package(url: "https://github.com/horizontalsystems/HdWalletKit.Swift.git", .upToNextMajor(from: "1.2.1")),
         .package(url: "https://github.com/horizontalsystems/HsToolKit.Swift.git", .upToNextMajor(from: "2.0.5"))
     ],
@@ -21,6 +22,7 @@ let package = Package(
             name: "MoneroKit",
             dependencies: [
                 "CMonero",
+                .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "HdWalletKit", package: "HdWalletKit.Swift"),
                 .product(name: "HsToolKit", package: "HsToolKit.Swift")
             ]

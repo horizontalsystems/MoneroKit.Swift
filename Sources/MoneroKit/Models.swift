@@ -5,20 +5,53 @@ public struct Transfer {
     public let amount: UInt64
 }
 
-public struct TransactionInfo {
-    public enum Direction: Int32 {
-        case `in` = 0
-        case out = 1
-    }
+public enum TransactionFilterType {
+    case incoming, outgoing
 
-    public let direction: Direction
-    public let isPending: Bool
-    public let isFailed: Bool
+    var types: [TransactionType] {
+        switch self {
+            case .incoming: return [.incoming, .sentToSelf]
+            case .outgoing: return [.outgoing, .sentToSelf]
+        }
+    }
+}
+
+public struct TransactionInfo {
+    public let uid: String
+    public let hash: String
+    public let type: TransactionType
+    public let blockHeight: UInt64
     public let amount: UInt64
     public let fee: UInt64
-    public let blockHeight: UInt64
-    public let confirmations: UInt64
-    public let hash: String
-    public let timestamp: Date
-    public var transfers: [Transfer]
+    public let isPending: Bool
+    public let isFailed: Bool
+    public let timestamp: Int
+    public let recipientAddress: String?
+
+    init(transaction: Transaction) {
+        self.uid = transaction.uid
+        self.hash = transaction.hash
+        self.type = transaction.type
+        self.blockHeight = transaction.blockHeight
+        self.amount = transaction.amount
+        self.fee = transaction.fee
+        self.isPending = transaction.isPending
+        self.isFailed = transaction.isFailed
+        self.timestamp = transaction.timestamp
+        self.recipientAddress = transaction.recipientAddress
+    }
+}
+
+public struct BalanceInfo: Equatable {
+    public let spendable: Int
+    public let unspendable: Int
+
+    public init(spendable: UInt64, unspendable: UInt64) {
+        self.spendable = Int(spendable)
+        self.unspendable = Int(unspendable)
+    }
+
+    public static func == (lhs: BalanceInfo, rhs: BalanceInfo) -> Bool {
+        lhs.spendable == rhs.spendable && lhs.unspendable == rhs.unspendable
+    }
 }
