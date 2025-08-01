@@ -68,16 +68,12 @@ public class Kit {
             .map { TransactionInfo(transaction: $0) }
     }
 
-    public func send(to address: String, amount: Int) throws {
-        try moneroCore.send(to: address, amount: amount)
+    public func send(to address: String, amount: Int, priority: SendPriority = .default) throws {
+        try moneroCore.send(to: address, amount: amount, priority: priority)
     }
 
-    public func estimateFee(amount: Int) -> UInt64 {
-        moneroCore.estimateFee(amount: amount)
-    }
-
-    public func validate(address: String) -> Bool {
-        moneroCore.validate(address: address)
+    public func estimateFee(amount: Int, address: String, priority: SendPriority = .default) throws -> UInt64 {
+        try moneroCore.estimateFee(amount: amount, address: address, priority: priority)
     }
 }
 
@@ -135,7 +131,7 @@ extension Kit: MoneroCoreDelegate {
 }
 
 extension Kit {
-    public static func directoryURL(for directoryName: String) throws -> URL {
+    private static func directoryURL(for directoryName: String) throws -> URL {
         let fileManager = FileManager.default
 
         let url = try fileManager
@@ -145,6 +141,10 @@ extension Kit {
         try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
 
         return url
+    }
+
+    public static func isValid(address: String, networkType: NetworkType) -> Bool {
+        MoneroCore.isValid(address: address, networkType: networkType)
     }
 }
 

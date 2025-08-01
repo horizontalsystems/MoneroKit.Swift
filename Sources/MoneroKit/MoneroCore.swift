@@ -18,6 +18,10 @@ public enum WalletStatus {
     }
 }
 
+public enum SendPriority: Int, CaseIterable {
+    case `default`, low, medium, high, last
+}
+
 class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
 
@@ -65,9 +69,9 @@ class MoneroCore {
         }
     }
 
-    var balance: BalanceInfo = .init(all: 0, unspendable: 0) {
+    var balance: BalanceInfo = .init(all: 0, unlocked: 0) {
         didSet {
-            if oldValue.all != balance.all || oldValue.unspendable != balance.unspendable {
+            if oldValue.all != balance.all || oldValue.unlocked != balance.unlocked {
                 delegate?.balanceDidChange(balanceInfo: balance)
             }
         }
@@ -233,7 +237,7 @@ class MoneroCore {
     }
 
     private func startBackgroundSync() {
-        guard let cWalletPath, let walletPointer else { return }
+        guard let walletPointer else { return }
 
         let backgroundSyncSetupSuccess = MONERO_Wallet_setupBackgroundSync(walletPointer, BackgroundSyncType.customPassword.rawValue, cWalletPassword, "")
 
@@ -275,7 +279,7 @@ class MoneroCore {
         let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
         let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
         let allBalance = MONERO_Wallet_balance(walletPtr, 0)
-        let unspendable = MONERO_Wallet_unlockedBalance(walletPtr, 0)
+        let unlocked = MONERO_Wallet_unlockedBalance(walletPtr, 0)
         let newWalletStatus = MONERO_Wallet_status(walletPtr)
 
         if let listenerPtr = walletListenerPointer, MONERO_cw_WalletListener_isNeedToRefresh(listenerPtr) {
@@ -285,7 +289,7 @@ class MoneroCore {
 
         daemonHeight = newDaemonHeight
         isSynchronized = newIsSynchronized
-        balance = BalanceInfo(all: allBalance, unspendable: unspendable)
+        balance = BalanceInfo(all: allBalance, unlocked: unlocked)
 
         self.lastBlockHeight = newWalletHeight
         delegate?.lastBlockHeightDidChange(height: newWalletHeight)
@@ -362,13 +366,13 @@ class MoneroCore {
         transactions = fetchedTransactions.sorted(by: { $0.timestamp > $1.timestamp })
     }
 
-    func send(to address: String, amount: Int) throws {
+    func send(to address: String, amount: Int, priority: SendPriority = .default) throws {
         guard let walletPtr = walletPointer else {
             throw MoneroCoreError.walletNotInitialized
         }
 
         let cAddress = (address as NSString).utf8String
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", UInt64(amount), 0, 0, 0, "", "")
+        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", UInt64(amount), 0, Int32(priority.rawValue), 0, "", "")
 
         if let txPtr = pendingTxPtr {
             let status = MONERO_PendingTransaction_status(txPtr)
@@ -387,25 +391,25 @@ class MoneroCore {
         }
     }
 
-    func estimateFee(amount: Int) -> UInt64 {
+    func estimateFee(amount: Int, address: String, priority: SendPriority = .default) throws -> UInt64 {
         guard let walletPtr = walletPointer else {
             return 0
         }
 
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, "", "", UInt64(amount), 0, 0, 0, "", "")
+        let cAddress = (address as NSString).utf8String
+        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", UInt64(amount), 0, Int32(priority.rawValue), 0, "", "")
 
         if let txPtr = pendingTxPtr {
             let status = MONERO_PendingTransaction_status(txPtr)
             if status == 0 {
                 return MONERO_PendingTransaction_fee(txPtr)
+            } else {
+                let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown pending transaction error"
+                throw MoneroCoreError.estimationFailed(error)
             }
         }
 
         return 0
-    }
-
-    func validate(address: String) -> Bool {
-        return MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
     }
 
     var receiveAddress: String {
@@ -415,8 +419,17 @@ class MoneroCore {
 
 }
 
+extension MoneroCore {
+
+    static func isValid(address: String, networkType: NetworkType) -> Bool {
+        return MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
+    }
+
+}
+
 public enum MoneroCoreError: Error {
     case walletNotInitialized
+    case estimationFailed(String)
     case creationFailed(String)
     case commitFailed(String)
     case walletStatusError(String?)
