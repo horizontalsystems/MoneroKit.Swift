@@ -278,8 +278,6 @@ class MoneroCore {
         let newDaemonHeight = MONERO_Wallet_daemonBlockChainHeight(walletPtr)
         let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
         let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
-        let allBalance = MONERO_Wallet_balance(walletPtr, 0)
-        let unlocked = MONERO_Wallet_unlockedBalance(walletPtr, 0)
         let newWalletStatus = MONERO_Wallet_status(walletPtr)
 
         if let listenerPtr = walletListenerPointer, MONERO_cw_WalletListener_isNeedToRefresh(listenerPtr) {
@@ -289,9 +287,7 @@ class MoneroCore {
 
         daemonHeight = newDaemonHeight
         isSynchronized = newIsSynchronized
-        balance = BalanceInfo(all: allBalance, unlocked: unlocked)
-
-        self.lastBlockHeight = newWalletHeight
+        lastBlockHeight = newWalletHeight
         delegate?.lastBlockHeightDidChange(height: newWalletHeight)
 
         if newWalletStatus != 0 {
@@ -299,12 +295,19 @@ class MoneroCore {
             let errorStr = stringFromCString(errorCStr)
             print("Wallet is in error state (\(newWalletStatus)): \(errorStr ?? "Unknown wallet error").")
             walletStatus = WalletStatus(newWalletStatus, error: errorStr) ?? .unknown
-        } else if newIsSynchronized {
-            stop()
-            fetchSubaddresses()
-            fetchTransactions()
+        } else {
             _ = MONERO_Wallet_store(walletPtr, cWalletPath)
+            let allBalance = MONERO_Wallet_balance(walletPtr, 0)
+            let unlocked = MONERO_Wallet_unlockedBalance(walletPtr, 0)
+            balance = BalanceInfo(all: allBalance, unlocked: unlocked)
             walletStatus = .ok
+
+            if newIsSynchronized {
+                stop()
+                fetchSubaddresses()
+                fetchTransactions()
+                _ = MONERO_Wallet_store(walletPtr, cWalletPath)
+            }
         }
     }
 
