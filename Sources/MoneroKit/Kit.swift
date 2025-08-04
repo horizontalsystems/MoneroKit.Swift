@@ -24,20 +24,12 @@ public class Kit {
         moneroCore.delegate = self
     }
 
-    public var daemonHeight: Int? {
-        moneroCore.daemonHeight.map { Int($0) }
-    }
-
-    public var walletBlockHeight: Int? {
-        moneroCore.walletBlockHeight.map { Int($0) }
+    public var syncState: SyncState {
+        moneroCore.syncState
     }
 
     public var balanceInfo: BalanceInfo {
         moneroCore.balance
-    }
-
-    public var isSynchronized: Bool {
-        moneroCore.isSynchronized
     }
 
     public var walletStatus: WalletStatus {
@@ -78,6 +70,10 @@ public class Kit {
 }
 
 extension Kit: MoneroCoreDelegate {
+    func syncStateDidChange(state: SyncState) {
+        delegate?.syncStateDidChange(state: state)
+    }
+
     func subAddresssesDidChange(subAddresses: [String]) {
         storage.update(subAddresses: subAddresses, account: 0)
     }
@@ -119,14 +115,6 @@ extension Kit: MoneroCoreDelegate {
 
     func walletStatusDidChange(status: WalletStatus) {
         delegate?.walletStatusDidChange(status: status)
-    }
-
-    func syncStateDidChange(isSynchronized: Bool) {
-        delegate?.syncStateDidChange(isSynchronized: isSynchronized)
-    }
-
-    func lastBlockHeightDidChange(height: UInt64) {
-        delegate?.lastBlockHeightDidChange(height: height)
     }
 }
 

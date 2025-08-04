@@ -4,8 +4,7 @@ public protocol MoneroKitDelegate: AnyObject {
     func balanceDidChange(balanceInfo: BalanceInfo)
     func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo])
     func walletStatusDidChange(status: WalletStatus)
-    func syncStateDidChange(isSynchronized: Bool)
-    func lastBlockHeightDidChange(height: UInt64)
+    func syncStateDidChange(state: SyncState)
 }
 
 protocol MoneroCoreDelegate: AnyObject {
@@ -13,6 +12,5 @@ protocol MoneroCoreDelegate: AnyObject {
     func transactionsDidChange(transactions: [MoneroCore.Transaction])
     func subAddresssesDidChange(subAddresses: [String])
     func walletStatusDidChange(status: WalletStatus)
-    func syncStateDidChange(isSynchronized: Bool)
-    func lastBlockHeightDidChange(height: UInt64)
+    func syncStateDidChange(state: SyncState)
 }

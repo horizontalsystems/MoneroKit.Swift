@@ -55,3 +55,10 @@ public struct BalanceInfo: Equatable {
         lhs.all == rhs.all && lhs.unlocked == rhs.unlocked
     }
 }
+
+public struct SyncState {
+    public var syncStartBlockHeight: UInt64?
+    public var daemonHeight: UInt64?
+    public var walletBlockHeight: UInt64?
+    public var isSynchronized: Bool
+}

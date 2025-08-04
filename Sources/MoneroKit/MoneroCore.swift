@@ -59,12 +59,11 @@ class MoneroCore {
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
     private var cDaemonAddress: UnsafeMutablePointer<CChar>?
 
-    var daemonHeight: UInt64?
-    var walletBlockHeight: UInt64? {
+    var syncState: SyncState = .init(isSynchronized: false) {
         didSet {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                delegate?.lastBlockHeightDidChange(height: walletBlockHeight ?? 0)
+                delegate?.syncStateDidChange(state: syncState)
             }
         }
     }
@@ -77,17 +76,6 @@ class MoneroCore {
                 case (.unknown, .unknown), (.ok, .ok), (.error, .error), (.critical, .critical): ()
                 default:
                     delegate?.walletStatusDidChange(status: walletStatus)
-                }
-            }
-        }
-    }
-
-    var isSynchronized: Bool = false {
-        didSet {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if oldValue != isSynchronized {
-                    delegate?.syncStateDidChange(isSynchronized: isSynchronized)
                 }
             }
         }
@@ -302,14 +290,14 @@ class MoneroCore {
                     }
 
                     isRefreshing = true
-                    checkWalletStatusAndRefresh()
+                    checkWalletSync()
                     isRefreshing = false
                 }
             }
         }
     }
 
-    private func checkWalletStatusAndRefresh() {
+    private func checkWalletSync() {
         guard let walletPtr = walletPointer else { return }
 
         let newWalletStatus = MONERO_Wallet_status(walletPtr)
@@ -324,9 +312,13 @@ class MoneroCore {
         let newDaemonHeight = MONERO_Wallet_daemonBlockChainHeight(walletPtr)
         let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
         let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
-        daemonHeight = newDaemonHeight
-        walletBlockHeight = newWalletHeight
-        isSynchronized = newIsSynchronized
+
+        syncState = .init(
+            syncStartBlockHeight: syncState.syncStartBlockHeight ?? newWalletHeight,
+            daemonHeight: newDaemonHeight,
+            walletBlockHeight: newWalletHeight,
+            isSynchronized: newIsSynchronized
+        )
 
         if newIsSynchronized {
             stop()
