@@ -51,8 +51,8 @@ class GrdbStorage {
     func transactions(fromTimestamp: Int?, type: TransactionFilterType?, limit: Int?) -> [Transaction] {
         try! dbPool.read { db in
             var query = Transaction.filter(Transaction.Columns.timestamp < (fromTimestamp ?? Int.max))
-            
-            if let type = type {
+
+            if let type {
                 query = query.filter(type.types.contains(Transaction.Columns.type))
             }
 
@@ -63,7 +63,7 @@ class GrdbStorage {
     func update(transactions: [Transaction]) {
         try! dbPool.write { db in
             try Transaction.deleteAll(db)
-            
+
             for transaction in transactions {
                 try transaction.insert(db)
             }
@@ -84,5 +84,4 @@ class GrdbStorage {
             try SubAddress.filter(SubAddress.Columns.address == address).fetchOne(db) != nil
         }
     }
-
 }

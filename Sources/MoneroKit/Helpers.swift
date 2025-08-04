@@ -1,6 +1,6 @@
-import Foundation
 import BigInt
 import CMonero
+import Foundation
 import HdWalletKit
 import HsToolKit
 
@@ -44,8 +44,8 @@ func reduceECKey(_ buffer: [UInt8]) -> [UInt8] {
 
     // Convert result (BigUInt) to little-endian [UInt8] with 32 bytes
     var resultBuffer = [UInt8](repeating: 0, count: 32)
-    for i in 0..<32 {
-        resultBuffer[i] = UInt8(result & 0xff)
+    for i in 0 ..< 32 {
+        resultBuffer[i] = UInt8(result & 0xFF)
         result >>= 8
     }
 

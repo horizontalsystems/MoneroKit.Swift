@@ -10,8 +10,8 @@ public enum TransactionFilterType {
 
     var types: [TransactionType] {
         switch self {
-            case .incoming: return [.incoming, .sentToSelf]
-            case .outgoing: return [.outgoing, .sentToSelf]
+        case .incoming: return [.incoming, .sentToSelf]
+        case .outgoing: return [.outgoing, .sentToSelf]
         }
     }
 }
@@ -29,16 +29,16 @@ public struct TransactionInfo {
     public let recipientAddress: String?
 
     init(transaction: Transaction) {
-        self.uid = transaction.uid
-        self.hash = transaction.hash
-        self.type = transaction.type
-        self.blockHeight = transaction.blockHeight
-        self.amount = transaction.amount
-        self.fee = transaction.fee
-        self.isPending = transaction.isPending
-        self.isFailed = transaction.isFailed
-        self.timestamp = transaction.timestamp
-        self.recipientAddress = transaction.recipientAddress
+        uid = transaction.uid
+        hash = transaction.hash
+        type = transaction.type
+        blockHeight = transaction.blockHeight
+        amount = transaction.amount
+        fee = transaction.fee
+        isPending = transaction.isPending
+        isFailed = transaction.isFailed
+        timestamp = transaction.timestamp
+        recipientAddress = transaction.recipientAddress
     }
 }
 

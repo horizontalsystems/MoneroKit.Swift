@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-//enum TransactionStatus: Int, DatabaseValueConvertible, Codable { case new, relayed, invalid }
+// enum TransactionStatus: Int, DatabaseValueConvertible, Codable { case new, relayed, invalid }
 
 public enum TransactionType: Int, DatabaseValueConvertible, Codable {
     case incoming = 1
@@ -22,7 +22,7 @@ class Transaction: Record {
     var recipientAddress: String?
 
     init(hash: String, type: TransactionType, blockHeight: UInt64, amount: UInt64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, recipientAddress: String?) {
-        self.uid = UUID().uuidString
+        uid = UUID().uuidString
         self.hash = hash
         self.type = type
         self.blockHeight = blockHeight

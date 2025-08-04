@@ -4,7 +4,7 @@ public class Kit {
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
 
-    weak public var delegate: MoneroKitDelegate? = nil
+    public weak var delegate: MoneroKitDelegate?
 
     public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet) throws {
         let directoryUrl = try Self.directoryURL(for: "MoneroKit/\(walletId)-\(networkType.rawValue)")
@@ -28,8 +28,8 @@ public class Kit {
         moneroCore.daemonHeight.map { Int($0) }
     }
 
-    public var lastBlockHeight: Int? {
-        moneroCore.lastBlockHeight.map { Int($0) }
+    public var walletBlockHeight: Int? {
+        moneroCore.walletBlockHeight.map { Int($0) }
     }
 
     public var balanceInfo: BalanceInfo {
@@ -57,7 +57,7 @@ public class Kit {
     }
 
     public func transactions(fromUid: String? = nil, type: TransactionFilterType?, limit: Int? = nil) -> [TransactionInfo] {
-        var resolvedTimestamp: Int? = nil
+        var resolvedTimestamp: Int?
 
         if let fromUid, let transaction = storage.transaction(byUid: fromUid) {
             resolvedTimestamp = transaction.timestamp
@@ -81,7 +81,7 @@ extension Kit: MoneroCoreDelegate {
     func subAddresssesDidChange(subAddresses: [String]) {
         storage.update(subAddresses: subAddresses, account: 0)
     }
-    
+
     func balanceDidChange(balanceInfo: BalanceInfo) {
         delegate?.balanceDidChange(balanceInfo: balanceInfo)
     }
@@ -124,7 +124,7 @@ extension Kit: MoneroCoreDelegate {
     func syncStateDidChange(isSynchronized: Bool) {
         delegate?.syncStateDidChange(isSynchronized: isSynchronized)
     }
-    
+
     func lastBlockHeightDidChange(height: UInt64) {
         delegate?.lastBlockHeightDidChange(height: height)
     }

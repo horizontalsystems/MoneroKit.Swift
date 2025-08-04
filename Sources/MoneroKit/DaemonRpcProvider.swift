@@ -13,17 +13,14 @@ class DaemonRpcProvider {
 }
 
 extension DaemonRpcProvider {
-
-    func getHeight(jws: String) async throws -> Int {
+    func getHeight(jws _: String) async throws -> Int {
         let response: DaemonHeightResponse = try await networkManager.fetch(url: "\(baseUrl)/get_height", method: .get)
 
         return response.height
     }
-
 }
 
 extension DaemonRpcProvider {
-
     struct DaemonHeightResponse: ImmutableMappable {
         let hash: String
         let height: Int
@@ -37,5 +34,4 @@ extension DaemonRpcProvider {
             untrusted = try map.value("untrusted")
         }
     }
-
 }
