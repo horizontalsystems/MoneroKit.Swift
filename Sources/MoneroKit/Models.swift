@@ -62,3 +62,43 @@ public struct SyncState {
     public var walletBlockHeight: UInt64?
     public var isSynchronized: Bool
 }
+
+public enum SendPriority: Int, CaseIterable {
+    case `default`, low, medium, high, last
+}
+
+public enum NetworkType: Int32, CaseIterable {
+    case mainnet = 0
+    case testnet = 1
+    case stagenet = 2
+}
+
+public enum WalletStatus {
+    case unknown, ok, error(Error?), critical(Error?)
+
+    init?(_ status: Int32, error: String?) {
+        switch status {
+            case 0:
+                self = .ok
+            case 1:
+                self = .error(MoneroCoreError.walletStatusError(error))
+            case 2:
+                self = .critical(MoneroCoreError.walletStatusError(error))
+            default:
+                return nil
+        }
+    }
+}
+
+public enum SendAmount {
+    case value(Int)
+    case all
+
+    var value: UInt64 {
+        switch self {
+            case .all: return UInt64(0)
+            case .value(let value): return UInt64(value)
+        }
+    }
+
+}

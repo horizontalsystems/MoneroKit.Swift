@@ -1,6 +1,7 @@
 import Foundation
 
 public class Kit {
+    static public let confirmationsThreshold: UInt64 = 10
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
 
@@ -60,12 +61,12 @@ public class Kit {
             .map { TransactionInfo(transaction: $0) }
     }
 
-    public func send(to address: String, amount: Int, priority: SendPriority = .default) throws {
+    public func send(to address: String, amount: SendAmount, priority: SendPriority = .default) throws {
         try moneroCore.send(to: address, amount: amount, priority: priority)
     }
 
-    public func estimateFee(amount: Int, address: String, priority: SendPriority = .default) throws -> UInt64 {
-        try moneroCore.estimateFee(amount: amount, address: address, priority: priority)
+    public func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
+        try moneroCore.estimateFee(address: address, amount: amount, priority: priority)
     }
 }
 
@@ -139,4 +140,11 @@ extension Kit {
 public enum MoneroKitError: Error {
     case invalidWalletId
     case invalidSeed
+}
+
+public protocol MoneroKitDelegate: AnyObject {
+    func balanceDidChange(balanceInfo: BalanceInfo)
+    func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo])
+    func walletStatusDidChange(status: WalletStatus)
+    func syncStateDidChange(state: SyncState)
 }
