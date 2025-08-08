@@ -78,14 +78,14 @@ public enum WalletStatus {
 
     init?(_ status: Int32, error: String?) {
         switch status {
-            case 0:
-                self = .ok
-            case 1:
-                self = .error(MoneroCoreError.walletStatusError(error))
-            case 2:
-                self = .critical(MoneroCoreError.walletStatusError(error))
-            default:
-                return nil
+        case 0:
+            self = .ok
+        case 1:
+            self = .error(MoneroCoreError.walletStatusError(error))
+        case 2:
+            self = .critical(MoneroCoreError.walletStatusError(error))
+        default:
+            return nil
         }
     }
 }
@@ -96,9 +96,8 @@ public enum SendAmount {
 
     var value: UInt64 {
         switch self {
-            case .all: return UInt64(0)
-            case .value(let value): return UInt64(value)
+        case .all: return UInt64(0)
+        case let .value(value): return UInt64(value)
         }
     }
-
 }

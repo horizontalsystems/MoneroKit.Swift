@@ -1,5 +1,6 @@
-import Foundation
 import CMonero
+import Foundation
+import HsToolKit
 
 class BackgroundSyncer {
     private var timer: Timer?
@@ -9,6 +10,11 @@ class BackgroundSyncer {
     private var walletPointer: UnsafeMutableRawPointer?
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
     private let queue = DispatchQueue(label: "monero.kit.background-sync-queue", qos: .userInitiated)
+    private let logger: Logger?
+
+    init(logger: Logger?) {
+        self.logger = logger
+    }
 
     deinit {
         stop()
@@ -27,7 +33,7 @@ class BackgroundSyncer {
             if !backgroundSyncSetupSuccess {
                 let errorCStr = MONERO_Wallet_errorString(walletPointer)
                 let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
-                print("Error setup Background sync: \(msg)")
+                logger?.error("Error setup Background sync: \(msg)")
                 return
             }
         }
@@ -36,7 +42,7 @@ class BackgroundSyncer {
         if !startedBackgroundSync {
             let errorCStr = MONERO_Wallet_errorString(walletPointer)
             let msg = stringFromCString(errorCStr) ?? "Start background sync error"
-            print("Error start Background sync: \(msg)")
+            logger?.error("Error start Background sync: \(msg)")
             return
         }
 
@@ -67,7 +73,7 @@ class BackgroundSyncer {
             if !stopped {
                 let errorCStr = MONERO_Wallet_errorString(walletPtr)
                 let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
-                print("Error setup Background sync: \(msg)")
+                logger?.error("Error stop Background sync: \(msg)")
                 return
             }
         }

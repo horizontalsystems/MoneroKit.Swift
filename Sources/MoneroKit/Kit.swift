@@ -1,16 +1,19 @@
 import Foundation
+import HsToolKit
 
 public class Kit {
-    static public let confirmationsThreshold: UInt64 = 10
+    public static let confirmationsThreshold: UInt64 = 10
+    public static let lastBirthdayHeight: UInt64 = 3_472_634
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
 
     public weak var delegate: MoneroKitDelegate?
 
-    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet) throws {
+    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32 = 0) throws {
         let directoryUrl = try Self.directoryURL(for: "MoneroKit/\(walletId)-\(networkType.rawValue)")
         let walletPath = directoryUrl.appendingPathComponent("monero_core").path
         let databaseFilePath = directoryUrl.appendingPathComponent("storage").path
+        let logger = logger ?? Logger(minLogLevel: .verbose)
 
         moneroCore = MoneroCore(
             mnemonic: mnemonic,
@@ -18,7 +21,9 @@ public class Kit {
             walletPassword: walletId,
             daemonAddress: daemonAddress,
             restoreHeight: restoreHeight,
-            networkType: networkType
+            networkType: networkType,
+            logger: logger,
+            moneroCoreLogLevel: moneroCoreLogLevel
         )
         storage = GrdbStorage(databaseFilePath: databaseFilePath)
 
@@ -119,7 +124,7 @@ extension Kit: MoneroCoreDelegate {
     }
 }
 
-extension Kit {
+public extension Kit {
     private static func directoryURL(for directoryName: String) throws -> URL {
         let fileManager = FileManager.default
 
@@ -132,7 +137,18 @@ extension Kit {
         return url
     }
 
-    public static func isValid(address: String, networkType: NetworkType) -> Bool {
+    static func removeAll(except excludedFiles: [String]) throws {
+        let fileManager = FileManager.default
+        let fileUrls = try fileManager.contentsOfDirectory(at: directoryURL(for: "MoneroKit"), includingPropertiesForKeys: nil)
+
+        for filename in fileUrls {
+            if !excludedFiles.contains(where: { filename.lastPathComponent.contains($0) }) {
+                try fileManager.removeItem(at: filename)
+            }
+        }
+    }
+
+    static func isValid(address: String, networkType: NetworkType) -> Bool {
         MoneroCore.isValid(address: address, networkType: networkType)
     }
 }

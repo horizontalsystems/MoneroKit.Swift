@@ -490,6 +490,7 @@ const int WalletBackgroundSync_ReusePassword = 1;
 const int BackgroundSync_CustomPassword = 2;
 //    };
 //     virtual ~Wallet() = 0;
+extern ADDAPI void MONERO_Wallet_delete(void* wallet_ptr);
 //     virtual std::string seed(const std::string& seed_offset = "") const = 0;
 extern ADDAPI const char* MONERO_Wallet_seed(void* wallet_ptr, const char* seed_offset);
 //     virtual std::string getSeedLanguage() const = 0;

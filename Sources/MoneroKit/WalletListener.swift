@@ -1,5 +1,5 @@
-import Foundation
 import CMonero
+import Foundation
 
 class WalletListener {
     private var walletListenerPointer: UnsafeMutableRawPointer?
@@ -21,7 +21,7 @@ class WalletListener {
 
         if let height = lockedBalanceBlockHeight {
             let newHeight = MONERO_cw_WalletListener_height(walletListenerPointer)
-            if newHeight > height && newHeight - height >= Kit.confirmationsThreshold {
+            if newHeight > height, newHeight - height >= Kit.confirmationsThreshold {
                 onNewTransaction?()
                 lockedBalanceBlockHeight = nil
             }
@@ -59,7 +59,7 @@ class WalletListener {
         isRunning = false
 
         if let walletPointer {
-            MONERO_Wallet_pauseRefresh(walletPointer)
+            MONERO_Wallet_stop(walletPointer)
         }
     }
 
@@ -68,5 +68,4 @@ class WalletListener {
             lockedBalanceBlockHeight = height
         }
     }
-
 }

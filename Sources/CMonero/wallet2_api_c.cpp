@@ -1051,6 +1051,13 @@ bool MONERO_DeviceProgress_indeterminate(void* deviceProgress_ptr) {
 
 // Wallet
 
+void MONERO_Wallet_delete(void* wallet_ptr) {
+    DEBUG_START()
+    Monero::Wallet *wallet = reinterpret_cast<Monero::Wallet*>(wallet_ptr);
+    delete wallet;
+    DEBUG_END()
+}
+
 const char* MONERO_Wallet_seed(void* wallet_ptr, const char* seed_offset) {
     DEBUG_START()
     Monero::Wallet *wallet = reinterpret_cast<Monero::Wallet*>(wallet_ptr);
