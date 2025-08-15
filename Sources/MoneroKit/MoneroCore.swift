@@ -207,8 +207,6 @@ class MoneroCore {
     }
 
     private func onSyncStateChanged() {
-        guard let walletPtr = walletPointer else { return }
-
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             delegate?.walletStateDidChange(state: state)
@@ -346,23 +344,17 @@ class MoneroCore {
 
     func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
         guard let walletPtr = walletPointer else {
-            return 0
+            throw MoneroCoreError.walletNotInitialized
         }
 
         let cAddress = (address as NSString).utf8String
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", amount.value, 0, Int32(priority.rawValue), 0, "", "")
-
-        if let txPtr = pendingTxPtr {
-            let status = MONERO_PendingTransaction_status(txPtr)
-            if status == 0 {
-                return MONERO_PendingTransaction_fee(txPtr)
-            } else {
-                let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown pending transaction error"
-                throw MoneroCoreError.match(error) ?? MoneroCoreError.transactionEstimationFailed(error)
-            }
+        let cAmount = ("\(amount.value)" as NSString).utf8String
+        let fee = MONERO_Wallet_estimateTransactionFee(walletPtr, cAddress, "", cAmount, "", Int32(priority.rawValue))
+        let error = stringFromCString(MONERO_Wallet_errorString(walletPtr)) ?? ""
+        if !error.isEmpty, error != "No error" {
+            throw MoneroCoreError.match(error) ?? MoneroCoreError.transactionEstimationFailed(error)
         }
-
-        return 0
+        return fee
     }
 
     struct Transaction {

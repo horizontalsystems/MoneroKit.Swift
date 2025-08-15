@@ -1764,6 +1764,42 @@ void* MONERO_Wallet_createTransaction(void* wallet_ptr, const char* dst_addr, co
     DEBUG_END()
 }
 
+uint64_t MONERO_Wallet_estimateTransactionFee(void* wallet_ptr, const char* dst_addr_list, const char* dst_addr_list_separator, const char* amount_list, const char* amount_list_separator, int priority) {
+    DEBUG_START()
+    Monero::Wallet *wallet = reinterpret_cast<Monero::Wallet*>(wallet_ptr);
+
+    if (!dst_addr_list || !amount_list) {
+        return 0;
+    }
+
+    std::vector<std::string> addresses;
+    const std::string addr_sep(dst_addr_list_separator ? dst_addr_list_separator : "");
+    if (addr_sep.empty()) {
+        addresses.push_back(std::string(dst_addr_list));
+    } else {
+        addresses = splitStringVector(std::string(dst_addr_list), addr_sep);
+    }
+
+    std::vector<uint64_t> amounts;
+    const std::string amount_sep(amount_list_separator ? amount_list_separator : "");
+    if (amount_sep.empty()) {
+        amounts.push_back(Monero::Wallet::amountFromString(std::string(amount_list)));
+    } else {
+        amounts = splitStringUint(std::string(amount_list), amount_sep);
+    }
+
+    if (addresses.size() != amounts.size()) {
+        return 0;
+    }
+
+    std::vector<std::pair<std::string, uint64_t>> destinations;
+    for (size_t i = 0; i < addresses.size(); ++i) {
+        destinations.push_back(std::make_pair(addresses[i], amounts[i]));
+    }
+    return wallet->estimateTransactionFee(destinations, PendingTransaction_Priority_fromInt(priority));
+    DEBUG_END()
+}
+
 void* MONERO_Wallet_loadUnsignedTx(void* wallet_ptr, const char* fileName) {
     DEBUG_START()
     Monero::Wallet *wallet = reinterpret_cast<Monero::Wallet*>(wallet_ptr);
