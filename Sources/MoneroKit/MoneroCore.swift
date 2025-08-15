@@ -3,23 +3,20 @@ import Foundation
 import HsToolKit
 
 class MoneroCore {
-    static let storeBlocksCount: UInt64 = 2000
-
     weak var delegate: MoneroCoreDelegate?
 
     private var mnemonic: MoneroMnemonic
-    private var backgroundSyncer: BackgroundSyncer
+    private var stateManager: SyncStateManager
     private var walletListener: WalletListener
-    private var restoreHeight: UInt64 = 0
     private var networkType: NetworkType = .mainnet
-    private var lastStoredBlockHeight: UInt64 = 0
     private var walletManagerPointer: UnsafeMutableRawPointer?
     private var walletPointer: UnsafeMutableRawPointer?
     private var cWalletPath: UnsafeMutablePointer<CChar>?
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
     private var cDaemonAddress: UnsafeMutablePointer<CChar>?
     private let logger: Logger?
-    private let moneroCoreLogLevel: Int32 // 0..4
+    private let moneroCoreLogLevel: Int32? // 0..4
+    var restoreHeight: UInt64 = 0
 
     private var transactions: [Transaction] = [] {
         didSet {
@@ -39,26 +36,8 @@ class MoneroCore {
         }
     }
 
-    var syncState: SyncState = .init(isSynchronized: false) {
-        didSet {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                delegate?.syncStateDidChange(state: syncState)
-            }
-        }
-    }
-
-    var walletStatus: WalletStatus = .unknown {
-        didSet {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                switch (oldValue, walletStatus) {
-                case (.unknown, .unknown), (.ok, .ok), (.error, .error), (.critical, .critical): ()
-                default:
-                    delegate?.walletStatusDidChange(status: walletStatus)
-                }
-            }
-        }
+    var state: WalletState {
+        stateManager.state
     }
 
     var balance: BalanceInfo = .init(all: 0, unlocked: 0) {
@@ -77,7 +56,7 @@ class MoneroCore {
         return stringFromCString(MONERO_Wallet_address(walletPtr, 0, 0)) ?? ""
     }
 
-    init(mnemonic: MoneroMnemonic, walletPath: String, walletPassword: String, daemonAddress: String, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32) {
+    init(mnemonic: MoneroMnemonic, walletPath: String, walletPassword: String, daemonAddress: String, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
         self.mnemonic = mnemonic
         cWalletPath = strdup((walletPath as NSString).utf8String)
         cWalletPassword = strdup((walletPassword as NSString).utf8String)
@@ -86,7 +65,7 @@ class MoneroCore {
         self.networkType = networkType
         self.logger = logger
         self.moneroCoreLogLevel = moneroCoreLogLevel
-        backgroundSyncer = BackgroundSyncer(logger: logger)
+        stateManager = SyncStateManager(logger: logger)
         walletListener = WalletListener()
 
         walletManagerPointer = MONERO_WalletManagerFactory_getWalletManager()
@@ -122,7 +101,7 @@ class MoneroCore {
     }
 
     func stop() {
-        backgroundSyncer.stop()
+        stateManager.stop()
         walletListener.stop()
     }
 
@@ -131,7 +110,9 @@ class MoneroCore {
             throw MoneroCoreError.walletNotInitialized
         }
 
-        backgroundSyncer.start(walletPointer: walletPointer, cWalletPassword: cWalletPassword, onStatusCheck: checkWalletSync)
+        stateManager.start(walletPointer: walletPointer, cWalletPassword: cWalletPassword) { [weak self] in
+            self?.onSyncStateChanged()
+        }
     }
 
     private func startWalletListener() throws {
@@ -145,7 +126,9 @@ class MoneroCore {
     }
 
     private func openWallet() throws {
-        MONERO_WalletManagerFactory_setLogLevel(moneroCoreLogLevel)
+        if let moneroCoreLogLevel {
+            MONERO_WalletManagerFactory_setLogLevel(moneroCoreLogLevel)
+        }
 
         guard let walletManagerPointer, let cWalletPath else { return }
 
@@ -201,9 +184,6 @@ class MoneroCore {
             }
         }
 
-        walletPointer = recoveredWalletPtr
-        mnemonic.clear()
-
         guard let walletPtr = recoveredWalletPtr else {
             let errorCStr = MONERO_WalletManager_errorString(walletManagerPointer)
             let msg = stringFromCString(errorCStr) ?? "Unknown recovery error"
@@ -212,9 +192,6 @@ class MoneroCore {
         }
 
         let initSuccess = MONERO_Wallet_init(walletPtr, cDaemonAddress, 0, "", "", false, false, "")
-
-        _ = MONERO_Wallet_store(walletPtr, cWalletPath)
-
         guard initSuccess else {
             let errorCStr = MONERO_Wallet_errorString(walletPtr)
             let msg = stringFromCString(errorCStr) ?? "Unknown daemon init error"
@@ -223,46 +200,30 @@ class MoneroCore {
         }
 
         MONERO_Wallet_setTrustedDaemon(walletPtr, true)
+
+        walletPointer = recoveredWalletPtr
+        mnemonic.clear()
+        updateBalance()
     }
 
-    private func checkWalletSync() {
+    private func onSyncStateChanged() {
         guard let walletPtr = walletPointer else { return }
 
-        let newWalletStatus = MONERO_Wallet_status(walletPtr)
-        if newWalletStatus != 0 {
-            let errorCStr = MONERO_Wallet_errorString(walletPtr)
-            let errorStr = stringFromCString(errorCStr)
-            logger?.error("Wallet is in error state (\(newWalletStatus)): \(errorStr ?? "Unknown wallet error").")
-            walletStatus = WalletStatus(newWalletStatus, error: errorStr) ?? .unknown
-            return
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            delegate?.walletStateDidChange(state: state)
         }
 
-        let newDaemonHeight = MONERO_Wallet_daemonBlockChainHeight(walletPtr)
-        let newWalletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
-        let newIsSynchronized = MONERO_Wallet_synchronized(walletPtr)
+        if stateManager.state.isSynchronized {
+            stateManager.stop()
+        }
 
-        syncState = .init(
-            syncStartBlockHeight: syncState.syncStartBlockHeight ?? newWalletHeight,
-            daemonHeight: newDaemonHeight,
-            walletBlockHeight: newWalletHeight,
-            isSynchronized: newIsSynchronized
-        )
-
-        if newIsSynchronized {
-            backgroundSyncer.stop()
-            fetchSubaddresses()
+        if stateManager.state.isSynchronized || stateManager.chunkOfBlocksSynced {
             fetchTransactions()
-        }
-
-        if newIsSynchronized || (
-            lastStoredBlockHeight <= newWalletHeight && newWalletHeight - lastStoredBlockHeight >= Self.storeBlocksCount
-        ) {
             storeWallet()
             updateBalance()
-            lastStoredBlockHeight = newWalletHeight
+            stateManager.syncCached()
         }
-
-        walletStatus = .ok
     }
 
     private func storeWallet() {
@@ -350,7 +311,7 @@ class MoneroCore {
         }
 
         if hasUnconfirmedTransactions, biggestConfirmations < Kit.confirmationsThreshold,
-           let height = syncState.walletBlockHeight
+           let height = stateManager.state.walletBlockHeight
         {
             walletListener.setLockedBalanceHeight(height: height - biggestConfirmations)
         }
@@ -433,6 +394,5 @@ protocol MoneroCoreDelegate: AnyObject {
     func balanceDidChange(balanceInfo: BalanceInfo)
     func transactionsDidChange(transactions: [MoneroCore.Transaction])
     func subAddresssesDidChange(subAddresses: [String])
-    func walletStatusDidChange(status: WalletStatus)
-    func syncStateDidChange(state: SyncState)
+    func walletStateDidChange(state: WalletState)
 }

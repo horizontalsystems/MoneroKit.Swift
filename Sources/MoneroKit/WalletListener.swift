@@ -52,15 +52,18 @@ class WalletListener {
     }
 
     func stop() {
+        print("Stopping WalletListener")
         timer?.invalidate()
         timer = nil
         onNewTransaction = nil
         walletListenerPointer = nil
         isRunning = false
 
+        print("walletPointer is \(walletPointer)")
         if let walletPointer {
             MONERO_Wallet_stop(walletPointer)
         }
+        walletPointer = nil
     }
 
     func setLockedBalanceHeight(height: UInt64) {

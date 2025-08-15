@@ -56,13 +56,6 @@ public struct BalanceInfo: Equatable {
     }
 }
 
-public struct SyncState {
-    public var syncStartBlockHeight: UInt64?
-    public var daemonHeight: UInt64?
-    public var walletBlockHeight: UInt64?
-    public var isSynchronized: Bool
-}
-
 public enum SendPriority: Int, CaseIterable {
     case `default`, low, medium, high, last
 }
@@ -73,7 +66,7 @@ public enum NetworkType: Int32, CaseIterable {
     case stagenet = 2
 }
 
-public enum WalletStatus {
+public enum WalletCoreStatus {
     case unknown, ok, error(Error?), critical(Error?)
 
     init?(_ status: Int32, error: String?) {
@@ -86,6 +79,21 @@ public enum WalletStatus {
             self = .critical(MoneroCoreError.walletStatusError(error))
         default:
             return nil
+        }
+    }
+}
+
+public struct WalletState: Equatable {
+    public let status: WalletCoreStatus
+    public let daemonHeight: UInt64?
+    public let walletBlockHeight: UInt64?
+    public let isSynchronized: Bool
+
+    public static func == (lhs: WalletState, rhs: WalletState) -> Bool {
+        switch (lhs.status, rhs.status) {
+        case (.unknown, .unknown), (.ok, .ok), (.error, .error), (.critical, .critical):
+            return lhs.daemonHeight == rhs.daemonHeight && lhs.walletBlockHeight == rhs.walletBlockHeight && lhs.isSynchronized == rhs.isSynchronized
+        default: return false
         }
     }
 }

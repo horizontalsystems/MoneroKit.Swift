@@ -9,10 +9,19 @@ public class Kit {
 
     public weak var delegate: MoneroKitDelegate?
 
-    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32 = 0) throws {
-        let directoryUrl = try Self.directoryURL(for: "MoneroKit/\(walletId)-\(networkType.rawValue)")
-        let walletPath = directoryUrl.appendingPathComponent("monero_core").path
-        let databaseFilePath = directoryUrl.appendingPathComponent("storage").path
+    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
+        let baseDirectoryName = "MoneroKit/\(walletId)/network_\(networkType.rawValue)"
+        let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
+
+        let databasePath = baseDirectoryUrl.appendingPathComponent("storage").path
+        storage = GrdbStorage(databaseFilePath: databasePath)
+
+        let walletDirectoryName = "\(baseDirectoryName)/monero_core"
+        if storage.getBlockHeights() == nil {
+            try FileHandler.remove(for: walletDirectoryName)
+        }
+
+        let walletPath = try FileHandler.directoryURL(for: walletDirectoryName).appendingPathComponent("wallet").path
         let logger = logger ?? Logger(minLogLevel: .verbose)
 
         moneroCore = MoneroCore(
@@ -25,21 +34,20 @@ public class Kit {
             logger: logger,
             moneroCoreLogLevel: moneroCoreLogLevel
         )
-        storage = GrdbStorage(databaseFilePath: databaseFilePath)
 
         moneroCore.delegate = self
     }
 
-    public var syncState: SyncState {
-        moneroCore.syncState
+    public var restoreHeight: UInt64 {
+        moneroCore.restoreHeight
     }
 
     public var balanceInfo: BalanceInfo {
         moneroCore.balance
     }
 
-    public var walletStatus: WalletStatus {
-        moneroCore.walletStatus
+    public var walletState: WalletState {
+        moneroCore.state
     }
 
     public var receiveAddress: String {
@@ -76,8 +84,11 @@ public class Kit {
 }
 
 extension Kit: MoneroCoreDelegate {
-    func syncStateDidChange(state: SyncState) {
-        delegate?.syncStateDidChange(state: state)
+    func walletStateDidChange(state: WalletState) {
+        delegate?.walletStateDidChange(state: state)
+        if let daemonHeight = state.daemonHeight, let walletBlockHeight = state.walletBlockHeight {
+            storage.update(blockHeights: BlockHeights(daemonHeight: Int(daemonHeight), walletHeight: Int(walletBlockHeight)))
+        }
     }
 
     func subAddresssesDidChange(subAddresses: [String]) {
@@ -118,34 +129,11 @@ extension Kit: MoneroCoreDelegate {
         let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0) }
         delegate?.transactionsUpdated(inserted: [], updated: transactionInfos)
     }
-
-    func walletStatusDidChange(status: WalletStatus) {
-        delegate?.walletStatusDidChange(status: status)
-    }
 }
 
 public extension Kit {
-    private static func directoryURL(for directoryName: String) throws -> URL {
-        let fileManager = FileManager.default
-
-        let url = try fileManager
-            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            .appendingPathComponent(directoryName, isDirectory: true)
-
-        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
-
-        return url
-    }
-
     static func removeAll(except excludedFiles: [String]) throws {
-        let fileManager = FileManager.default
-        let fileUrls = try fileManager.contentsOfDirectory(at: directoryURL(for: "MoneroKit"), includingPropertiesForKeys: nil)
-
-        for filename in fileUrls {
-            if !excludedFiles.contains(where: { filename.lastPathComponent.contains($0) }) {
-                try fileManager.removeItem(at: filename)
-            }
-        }
+        try FileHandler.removeAll(except: excludedFiles)
     }
 
     static func isValid(address: String, networkType: NetworkType) -> Bool {
@@ -161,6 +149,5 @@ public enum MoneroKitError: Error {
 public protocol MoneroKitDelegate: AnyObject {
     func balanceDidChange(balanceInfo: BalanceInfo)
     func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo])
-    func walletStatusDidChange(status: WalletStatus)
-    func syncStateDidChange(state: SyncState)
+    func walletStateDidChange(state: WalletState)
 }

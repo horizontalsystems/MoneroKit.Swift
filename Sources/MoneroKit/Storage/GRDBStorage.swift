@@ -39,6 +39,16 @@ class GrdbStorage {
             }
         }
 
+        migrator.registerMigration("createBlockHeifhts") { db in
+            try db.create(table: BlockHeights.databaseTableName) { t in
+                t.column(BlockHeights.Columns.id.name, .text).notNull()
+                t.column(BlockHeights.Columns.daemonHeight.name, .text).notNull()
+                t.column(BlockHeights.Columns.walletHeight.name, .text).notNull()
+
+                t.primaryKey([BlockHeights.Columns.id.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 
@@ -82,6 +92,19 @@ class GrdbStorage {
     func addressExists(_ address: String) -> Bool {
         try! dbPool.read { db in
             try SubAddress.filter(SubAddress.Columns.address == address).fetchOne(db) != nil
+        }
+    }
+
+    func update(blockHeights: BlockHeights) {
+        try! dbPool.write { db in
+            try BlockHeights.deleteAll(db)
+            try blockHeights.insert(db)
+        }
+    }
+
+    func getBlockHeights() -> BlockHeights? {
+        try! dbPool.read { db in
+            try BlockHeights.fetchOne(db)
         }
     }
 }
