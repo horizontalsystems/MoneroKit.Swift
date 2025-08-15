@@ -52,21 +52,29 @@ class GrdbStorage {
         return migrator
     }
 
-    func transaction(byUid: String) -> Transaction? {
+    func transaction(byHash: String) -> Transaction? {
         try! dbPool.read { db in
-            try Transaction.filter(Transaction.Columns.uid == byUid).fetchOne(db)
+            try Transaction.filter(Transaction.Columns.hash == byHash).fetchOne(db)
         }
     }
 
-    func transactions(fromTimestamp: Int?, type: TransactionFilterType?, limit: Int?) -> [Transaction] {
+    func transactions(fromTimestamp: Int?, descending: Bool, type: TransactionFilterType?, limit: Int?) -> [Transaction] {
         try! dbPool.read { db in
-            var query = Transaction.filter(Transaction.Columns.timestamp < (fromTimestamp ?? Int.max))
+            var query = Transaction.order(descending ? Transaction.Columns.timestamp.desc : Transaction.Columns.timestamp.asc)
+
+            if let fromTimestamp {
+                query = query.filter(descending ? Transaction.Columns.timestamp < fromTimestamp : Transaction.Columns.timestamp > fromTimestamp)
+            }
 
             if let type {
                 query = query.filter(type.types.contains(Transaction.Columns.type))
             }
 
-            return try query.limit(limit ?? 100).fetchAll(db)
+            if let limit {
+                query = query.limit(limit)
+            }
+
+            return try query.fetchAll(db)
         }
     }
 

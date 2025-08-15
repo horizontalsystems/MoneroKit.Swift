@@ -62,15 +62,15 @@ public class Kit {
         moneroCore.stop()
     }
 
-    public func transactions(fromUid: String? = nil, type: TransactionFilterType?, limit: Int? = nil) -> [TransactionInfo] {
+    public func transactions(fromHash: String? = nil, descending: Bool, type: TransactionFilterType?, limit: Int?) -> [TransactionInfo] {
         var resolvedTimestamp: Int?
 
-        if let fromUid, let transaction = storage.transaction(byUid: fromUid) {
+        if let fromHash, let transaction = storage.transaction(byHash: fromHash) {
             resolvedTimestamp = transaction.timestamp
         }
 
         return storage
-            .transactions(fromTimestamp: resolvedTimestamp, type: type, limit: limit)
+            .transactions(fromTimestamp: resolvedTimestamp, descending: descending, type: type, limit: limit)
             .map { TransactionInfo(transaction: $0) }
     }
 
