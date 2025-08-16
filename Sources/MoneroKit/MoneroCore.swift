@@ -13,7 +13,7 @@ class MoneroCore {
     private var walletPointer: UnsafeMutableRawPointer?
     private var cWalletPath: UnsafeMutablePointer<CChar>?
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
-    private var cDaemonAddress: UnsafeMutablePointer<CChar>?
+    private var node: Node
     private let logger: Logger?
     private let moneroCoreLogLevel: Int32? // 0..4
     var restoreHeight: UInt64 = 0
@@ -56,11 +56,11 @@ class MoneroCore {
         return stringFromCString(MONERO_Wallet_address(walletPtr, 0, 0)) ?? ""
     }
 
-    init(mnemonic: MoneroMnemonic, walletPath: String, walletPassword: String, daemonAddress: String, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
+    init(mnemonic: MoneroMnemonic, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
         self.mnemonic = mnemonic
         cWalletPath = strdup((walletPath as NSString).utf8String)
         cWalletPassword = strdup((walletPassword as NSString).utf8String)
-        cDaemonAddress = strdup((daemonAddress as NSString).utf8String)
+        self.node = node
         self.restoreHeight = restoreHeight
         self.networkType = networkType
         self.logger = logger
@@ -78,7 +78,6 @@ class MoneroCore {
         // Free non-sensitive data
         if let ptr = cWalletPassword { free(ptr) }
         if let ptr = cWalletPath { free(ptr) }
-        if let ptr = cDaemonAddress { free(ptr) }
 
         if let walletPointer {
             MONERO_Wallet_delete(walletPointer)
@@ -140,7 +139,7 @@ class MoneroCore {
         } else {
             switch mnemonic {
             case let .bip39(mnemonic, passphrase):
-                let legacySeed = try legacySeedFromBip39(mnemonic: mnemonic)
+                let legacySeed = try legacySeedFromBip39(mnemonic: mnemonic, passphrase: passphrase)
 
                 recoveredWalletPtr = MONERO_WalletManager_recoveryWallet(
                     walletManagerPointer,
@@ -150,7 +149,7 @@ class MoneroCore {
                     networkType.rawValue,
                     restoreHeight,
                     1,
-                    passphrase
+                    ""
                 )
 
             case let .legacy(mnemonic, passphrase):
@@ -191,7 +190,10 @@ class MoneroCore {
             return
         }
 
-        let initSuccess = MONERO_Wallet_init(walletPtr, cDaemonAddress, 0, "", "", false, false, "")
+        let cDaemonAddress = strdup((node.url.absoluteString as NSString).utf8String)
+        let cDaemonLogin = strdup(((node.login ?? "") as NSString).utf8String)
+        let cDaemonPassword = strdup(((node.password ?? "") as NSString).utf8String)
+        let initSuccess = MONERO_Wallet_init(walletPtr, cDaemonAddress, 0, cDaemonLogin, cDaemonPassword, true, false, "")
         guard initSuccess else {
             let errorCStr = MONERO_Wallet_errorString(walletPtr)
             let msg = stringFromCString(errorCStr) ?? "Unknown daemon init error"
@@ -199,7 +201,7 @@ class MoneroCore {
             return
         }
 
-        MONERO_Wallet_setTrustedDaemon(walletPtr, true)
+        MONERO_Wallet_setTrustedDaemon(walletPtr, node.isTrusted)
 
         walletPointer = recoveredWalletPtr
         mnemonic.clear()

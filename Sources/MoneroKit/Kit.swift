@@ -3,13 +3,13 @@ import HsToolKit
 
 public class Kit {
     public static let confirmationsThreshold: UInt64 = 10
-    public static let lastBirthdayHeight: UInt64 = 3_472_634
+    public static let lastBirthdayHeight: UInt64 = 3_479_151
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
 
     public weak var delegate: MoneroKitDelegate?
 
-    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
+    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
         let baseDirectoryName = "MoneroKit/\(walletId)/network_\(networkType.rawValue)"
         let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
 
@@ -28,7 +28,7 @@ public class Kit {
             mnemonic: mnemonic,
             walletPath: walletPath,
             walletPassword: walletId,
-            daemonAddress: daemonAddress,
+            node: node,
             restoreHeight: restoreHeight,
             networkType: networkType,
             logger: logger,
