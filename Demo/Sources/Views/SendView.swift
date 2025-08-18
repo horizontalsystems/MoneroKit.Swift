@@ -23,8 +23,12 @@ struct SendView: View {
                 }
                 Button("Estimate Fee") {
                     if let amountDouble = Double(amount) {
-                        let fee = moneroKit?.estimateFee(amount: Int(amountDouble * 1_000_000_000_000)) ?? 0
-                        estimatedFee = "\(Double(fee) / 1_000_000_000_000) XMR"
+                        do {
+                            let fee = try moneroKit?.estimateFee(address: recipientAddress, amount: .value(Int(amountDouble * 1_000_000_000_000))) ?? 0
+                            estimatedFee = "\(Double(fee) / 1_000_000_000_000) XMR"
+                        } catch {
+                            transactionStatus = "Fee estimation error: \(error.localizedDescription)"
+                        }
                     }
                 }
             }
@@ -32,7 +36,7 @@ struct SendView: View {
             Button("Confirm & Send") {
                 if let amountDouble = Double(amount) {
                     do {
-                        try moneroKit?.send(to: recipientAddress, amount: Int(amountDouble * 1_000_000_000_000))
+                        try moneroKit?.send(to: recipientAddress, amount: .value(Int(amountDouble * 1_000_000_000_000)))
                         transactionStatus = "Transaction sent!"
                     } catch {
                         transactionStatus = "Error: \(error.localizedDescription)"

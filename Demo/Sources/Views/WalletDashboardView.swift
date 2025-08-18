@@ -2,15 +2,16 @@ import MoneroKit
 import SwiftUI
 
 struct WalletDashboardView: View {
-    @Binding var moneroKit: MoneroKit?
-    @ObservedObject var walletState: WalletState
+    @Binding var moneroKit: Kit?
+    @ObservedObject var walletState: App_WalletState
 
     var body: some View {
         List {
             Section(header: Text("Wallet Status")) {
                 Text("Synchronized: \(walletState.isSynchronized ? "Yes" : "No")")
+                Text("Daemon Height: \(walletState.daemonHeight)")
                 Text("Wallet Height: \(walletState.lastBlockHeight)")
-                Text("Balance: \(Double(walletState.balance.spendable) / 1_000_000_000_000) XMR")
+                Text("Balance: \(Double(walletState.balance.unlocked) / 1_000_000_000_000) XMR")
             }
 
             Section(header: Text("Actions")) {
@@ -32,15 +33,13 @@ struct WalletDashboardView: View {
                                 .font(.caption)
                                 .lineLimit(1)
                             Text("Amount: \(Double(tx.amount) / 1_000_000_000_000, specifier: "%.6f") XMR")
-                            Text("Direction: \(tx.direction == .out ? "Outgoing" : "Incoming")")
-                            if tx.direction == .out {
-                                ForEach(tx.transfers, id: \.address) { transfer in
-                                    Text("To: \(transfer.address)")
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                }
+                            Text("Direction: \(tx.type.description)")
+                            if let recipient = tx.recipientAddress {
+                                Text("To: \(recipient)")
+                                    .font(.caption)
+                                    .lineLimit(1)
                             }
-                            Text("Date: \(tx.timestamp, formatter: itemFormatter)")
+                            Text("Date: \(Date(timeIntervalSince1970: TimeInterval(tx.timestamp)), formatter: itemFormatter)")
                         }
                     }
                 }
@@ -56,3 +55,13 @@ private let itemFormatter: DateFormatter = {
     formatter.timeStyle = .medium
     return formatter
 }()
+
+extension TransactionType {
+    var description: String {
+        switch self {
+        case .incoming: return "Incoming"
+        case .outgoing: return "Outgoing"
+        case .sentToSelf: return "Sent to Self"
+        }
+    }
+}

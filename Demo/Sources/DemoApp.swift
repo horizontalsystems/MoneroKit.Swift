@@ -10,8 +10,8 @@ import SwiftUI
 
 @main
 struct DemoApp: App {
-    @StateObject private var walletState = WalletState()
-    @State private var moneroKit: MoneroKit?
+    @StateObject private var walletState = App_WalletState()
+    @State private var moneroKit: Kit?
 
     var body: some Scene {
         WindowGroup {

@@ -2,7 +2,7 @@ import MoneroKit
 import SwiftUI
 
 struct SubaddressesView: View {
-    @Binding var moneroKit: MoneroKit?
+    @Binding var moneroKit: Kit?
     @State private var newAddressLabel: String = ""
 
     var body: some View {
