@@ -290,7 +290,7 @@ bool MONERO_TransactionInfo_isCoinbase(void* txInfo_ptr) {
     return txInfo->isCoinbase();
     DEBUG_END()
 }
-uint64_t MONERO_TransactionInfo_amount(void* txInfo_ptr) {
+int64_t MONERO_TransactionInfo_amount(void* txInfo_ptr) {
     DEBUG_START()
     Monero::TransactionInfo *txInfo = reinterpret_cast<Monero::TransactionInfo*>(txInfo_ptr);
     return txInfo->amount();

@@ -368,7 +368,7 @@ class MoneroCore {
         let direction: Direction
         let isPending: Bool
         let isFailed: Bool
-        let amount: UInt64
+        let amount: Int64
         let fee: UInt64
         let blockHeight: UInt64
         let confirmations: UInt64

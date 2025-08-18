@@ -188,7 +188,7 @@ struct TransactionInfo
     virtual bool isPending() const = 0;
     virtual bool isFailed() const = 0;
     virtual bool isCoinbase() const = 0;
-    virtual uint64_t amount() const = 0;
+    virtual int64_t amount() const = 0;
     virtual uint64_t fee() const = 0;
     virtual uint64_t blockHeight() const = 0;
     virtual std::string description() const = 0;

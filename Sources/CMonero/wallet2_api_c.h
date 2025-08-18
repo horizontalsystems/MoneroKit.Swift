@@ -155,7 +155,7 @@ extern ADDAPI bool MONERO_TransactionInfo_isFailed(void* txInfo_ptr);
 //     virtual bool isCoinbase() const = 0;
 extern ADDAPI bool MONERO_TransactionInfo_isCoinbase(void* txInfo_ptr);
 //     virtual uint64_t amount() const = 0;
-extern ADDAPI uint64_t MONERO_TransactionInfo_amount(void* txInfo_ptr);
+extern ADDAPI int64_t MONERO_TransactionInfo_amount(void* txInfo_ptr);
 //     virtual uint64_t fee() const = 0;
 extern ADDAPI uint64_t MONERO_TransactionInfo_fee(void* txInfo_ptr);
 //     virtual uint64_t blockHeight() const = 0;

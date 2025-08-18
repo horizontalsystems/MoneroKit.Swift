@@ -3,7 +3,7 @@ import HsToolKit
 
 public class Kit {
     public static let confirmationsThreshold: UInt64 = 10
-    public static let lastBirthdayHeight: UInt64 = 3_479_151
+    public static let lastBirthdayHeight: UInt64 = 3_480_000
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
 

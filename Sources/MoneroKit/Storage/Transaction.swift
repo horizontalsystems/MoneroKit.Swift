@@ -14,14 +14,14 @@ class Transaction: Record {
     var hash: String
     var type: TransactionType
     var blockHeight: UInt64
-    var amount: UInt64
+    var amount: Int64
     var fee: UInt64
     var isPending: Bool
     var isFailed: Bool
     var timestamp: Int
     var recipientAddress: String?
 
-    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: UInt64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, recipientAddress: String?) {
+    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, recipientAddress: String?) {
         uid = UUID().uuidString
         self.hash = hash
         self.type = type

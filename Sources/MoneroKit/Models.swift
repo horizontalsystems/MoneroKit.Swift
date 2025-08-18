@@ -21,7 +21,7 @@ public struct TransactionInfo {
     public let hash: String
     public let type: TransactionType
     public let blockHeight: UInt64
-    public let amount: UInt64
+    public let amount: Int64
     public let fee: UInt64
     public let isPending: Bool
     public let isFailed: Bool
