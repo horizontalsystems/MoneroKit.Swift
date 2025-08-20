@@ -6,6 +6,7 @@ class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
 
     private var mnemonic: MoneroMnemonic
+    private var account: UInt32
     private var stateManager: SyncStateManager
     private var walletListener: WalletListener
     private var networkType: NetworkType = .mainnet
@@ -56,8 +57,9 @@ class MoneroCore {
         return stringFromCString(MONERO_Wallet_address(walletPtr, 0, 0)) ?? ""
     }
 
-    init(mnemonic: MoneroMnemonic, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
+    init(mnemonic: MoneroMnemonic, account: UInt32, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
         self.mnemonic = mnemonic
+        self.account = account
         cWalletPath = strdup((walletPath as NSString).utf8String)
         cWalletPassword = strdup((walletPassword as NSString).utf8String)
         self.node = node
@@ -233,18 +235,18 @@ class MoneroCore {
 
     private func updateBalance() {
         guard let walletPtr = walletPointer else { return }
-        let allBalance = MONERO_Wallet_balance(walletPtr, 0)
-        let unlocked = MONERO_Wallet_unlockedBalance(walletPtr, 0)
+        let allBalance = MONERO_Wallet_balance(walletPtr, account)
+        let unlocked = MONERO_Wallet_unlockedBalance(walletPtr, account)
         balance = BalanceInfo(all: allBalance, unlocked: unlocked)
     }
 
     private func fetchSubaddresses() {
         guard let walletPtr = walletPointer else { return }
         var fetchedAddresses: [String] = []
-        let count = MONERO_Wallet_numSubaddresses(walletPtr, 0)
+        let count = MONERO_Wallet_numSubaddresses(walletPtr, account)
 
         for i in 0 ..< count {
-            if let address = stringFromCString(MONERO_Wallet_address(walletPtr, 0, UInt64(i))) {
+            if let address = stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(i))) {
                 fetchedAddresses.append(address)
             }
         }
@@ -278,19 +280,29 @@ class MoneroCore {
                 }
             }
 
+            var subaddrIndices: [Int] = []
+            if let subaddrIndicesStr = stringFromCString(MONERO_TransactionInfo_subaddrIndex(txInfoPtr, " ")) {
+                subaddrIndices = subaddrIndicesStr.split(separator: " ").compactMap { Int($0) }
+            }
+
             let transaction = Transaction(
                 direction: direction,
                 isPending: MONERO_TransactionInfo_isPending(txInfoPtr),
                 isFailed: MONERO_TransactionInfo_isFailed(txInfoPtr),
                 amount: MONERO_TransactionInfo_amount(txInfoPtr),
                 fee: MONERO_TransactionInfo_fee(txInfoPtr),
+                subaddrIndices: subaddrIndices,
+                subaddrAccount: MONERO_TransactionInfo_subaddrAccount(txInfoPtr),
                 blockHeight: MONERO_TransactionInfo_blockHeight(txInfoPtr),
                 confirmations: MONERO_TransactionInfo_confirmations(txInfoPtr),
                 hash: hash,
                 timestamp: Date(timeIntervalSince1970: TimeInterval(MONERO_TransactionInfo_timestamp(txInfoPtr))),
                 transfers: transfers
             )
-            fetchedTransactions.append(transaction)
+
+            if transaction.subaddrAccount == account {
+                fetchedTransactions.append(transaction)
+            }
         }
 
         transactions = fetchedTransactions.sorted(by: { $0.timestamp > $1.timestamp })
@@ -370,6 +382,8 @@ class MoneroCore {
         let isFailed: Bool
         let amount: Int64
         let fee: UInt64
+        let subaddrIndices: [Int]
+        let subaddrAccount: UInt32
         let blockHeight: UInt64
         let confirmations: UInt64
         let hash: String

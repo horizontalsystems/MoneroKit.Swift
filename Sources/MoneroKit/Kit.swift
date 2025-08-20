@@ -9,7 +9,7 @@ public class Kit {
 
     public weak var delegate: MoneroKitDelegate?
 
-    public init(mnemonic: MoneroMnemonic, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
+    public init(mnemonic: MoneroMnemonic, account: UInt32, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
         let baseDirectoryName = "MoneroKit/\(walletId)/network_\(networkType.rawValue)"
         let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
 
@@ -26,6 +26,7 @@ public class Kit {
 
         moneroCore = MoneroCore(
             mnemonic: mnemonic,
+            account: account,
             walletPath: walletPath,
             walletPassword: walletId,
             node: node,
