@@ -28,7 +28,7 @@ class MoneroCore {
         }
     }
 
-    private var subAddresses: [String] = [] {
+    private var subAddresses: [SubAddress] = [] {
         didSet {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -50,11 +50,6 @@ class MoneroCore {
                 }
             }
         }
-    }
-
-    var receiveAddress: String {
-        guard let walletPtr = walletPointer else { return "" }
-        return stringFromCString(MONERO_Wallet_address(walletPtr, 0, 0)) ?? ""
     }
 
     init(mnemonic: MoneroMnemonic, account: UInt32, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
@@ -97,7 +92,7 @@ class MoneroCore {
             try openWallet()
         }
 
-        try startBackgroundSync()
+        try startStateManager()
         try startWalletListener()
     }
 
@@ -106,7 +101,12 @@ class MoneroCore {
         walletListener.stop()
     }
 
-    private func startBackgroundSync() throws {
+    func address(index: Int) -> String {
+        guard let walletPtr = walletPointer else { return "" }
+        return stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(index))) ?? ""
+    }
+
+    private func startStateManager() throws {
         guard let walletPointer, let cWalletPassword else {
             throw MoneroCoreError.walletNotInitialized
         }
@@ -122,7 +122,7 @@ class MoneroCore {
         }
 
         walletListener.start(walletPointer: walletPointer) { [weak self] in
-            try? self?.startBackgroundSync()
+            try? self?.startStateManager()
         }
     }
 
@@ -218,6 +218,7 @@ class MoneroCore {
 
         if stateManager.state.isSynchronized {
             stateManager.stop()
+            fetchSubaddresses()
         }
 
         if stateManager.state.isSynchronized || stateManager.chunkOfBlocksSynced {
@@ -242,12 +243,12 @@ class MoneroCore {
 
     private func fetchSubaddresses() {
         guard let walletPtr = walletPointer else { return }
-        var fetchedAddresses: [String] = []
+        var fetchedAddresses: [SubAddress] = []
         let count = MONERO_Wallet_numSubaddresses(walletPtr, account)
 
         for i in 0 ..< count {
             if let address = stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(i))) {
-                fetchedAddresses.append(address)
+                fetchedAddresses.append(.init(address: address, index: i))
             }
         }
 
@@ -344,7 +345,7 @@ class MoneroCore {
                     let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown commit error"
                     throw MoneroCoreError.transactionCommitFailed(error)
                 } else {
-                    try startBackgroundSync()
+                    try startStateManager()
                 }
             } else {
                 let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown pending transaction error"
@@ -390,6 +391,11 @@ class MoneroCore {
         let timestamp: Date
         var transfers: [Transfer]
     }
+
+    struct SubAddress {
+        let address: String
+        let index: Int
+    }
 }
 
 extension MoneroCore {
@@ -401,6 +407,6 @@ extension MoneroCore {
 protocol MoneroCoreDelegate: AnyObject {
     func balanceDidChange(balanceInfo: BalanceInfo)
     func transactionsDidChange(transactions: [MoneroCore.Transaction])
-    func subAddresssesDidChange(subAddresses: [String])
+    func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress])
     func walletStateDidChange(state: WalletState)
 }

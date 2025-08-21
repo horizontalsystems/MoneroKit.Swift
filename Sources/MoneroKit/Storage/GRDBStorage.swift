@@ -32,7 +32,6 @@ class GrdbStorage {
 
         migrator.registerMigration("createSubAddresses") { db in
             try db.create(table: SubAddress.databaseTableName) { t in
-                t.column(SubAddress.Columns.account.name, .text).notNull()
                 t.column(SubAddress.Columns.address.name, .text).notNull()
 
                 t.primaryKey([SubAddress.Columns.address.name], onConflict: .replace)
@@ -46,6 +45,18 @@ class GrdbStorage {
                 t.column(BlockHeights.Columns.walletHeight.name, .text).notNull()
 
                 t.primaryKey([BlockHeights.Columns.id.name], onConflict: .replace)
+            }
+        }
+
+        migrator.registerMigration("addIndexToSubAddress") { db in
+            try db.drop(table: SubAddress.databaseTableName)
+
+            try db.create(table: SubAddress.databaseTableName) { t in
+                t.column(SubAddress.Columns.address.name, .text).notNull()
+                t.column(SubAddress.Columns.index.name, .integer).notNull()
+                t.column(SubAddress.Columns.transactionsCount.name, .integer).notNull()
+
+                t.primaryKey([SubAddress.Columns.address.name], onConflict: .replace)
             }
         }
 
@@ -88,11 +99,11 @@ class GrdbStorage {
         }
     }
 
-    func update(subAddresses: [String], account: Int) {
+    func update(subAddresses: [SubAddress]) {
         try! dbPool.write { db in
-            try SubAddress.filter(SubAddress.Columns.account == account).deleteAll(db)
-            for address in subAddresses {
-                try SubAddress(account: account, address: address).insert(db)
+            try SubAddress.deleteAll(db)
+            for subAddresses in subAddresses {
+                try subAddresses.insert(db)
             }
         }
     }
@@ -100,6 +111,24 @@ class GrdbStorage {
     func addressExists(_ address: String) -> Bool {
         try! dbPool.read { db in
             try SubAddress.filter(SubAddress.Columns.address == address).fetchOne(db) != nil
+        }
+    }
+
+    func setAddressTransactionsCount(index: Int, txCount: Int) {
+        _ = try! dbPool.write { db in
+            try SubAddress.filter(SubAddress.Columns.index == index).updateAll(db, [SubAddress.Columns.transactionsCount.set(to: txCount)])
+        }
+    }
+
+    func getLastUsedAddress() -> SubAddress? {
+        try! dbPool.read { db in
+            try SubAddress.filter(SubAddress.Columns.transactionsCount > 0).order(SubAddress.Columns.index.desc).fetchOne(db)
+        }
+    }
+
+    func getAllAddresses() -> [SubAddress] {
+        try! dbPool.read { db in
+            try SubAddress.order(SubAddress.Columns.index.asc).fetchAll(db)
         }
     }
 

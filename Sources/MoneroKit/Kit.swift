@@ -52,7 +52,15 @@ public class Kit {
     }
 
     public var receiveAddress: String {
-        moneroCore.receiveAddress
+        if let lastUsedAddress = storage.getLastUsedAddress() {
+            return moneroCore.address(index: lastUsedAddress.index + 1)
+        }
+
+        return moneroCore.address(index: 0)
+    }
+
+    public var usedAddresses: [SubAddress] {
+        storage.getAllAddresses()
     }
 
     public func start() {
@@ -92,8 +100,10 @@ extension Kit: MoneroCoreDelegate {
         }
     }
 
-    func subAddresssesDidChange(subAddresses: [String]) {
-        storage.update(subAddresses: subAddresses, account: 0)
+    func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress]) {
+        let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index) }
+        storage.update(subAddresses: subAddresses)
+        delegate?.subAddressesUpdated(subaddresses: subAddresses)
     }
 
     func balanceDidChange(balanceInfo: BalanceInfo) {
@@ -129,6 +139,19 @@ extension Kit: MoneroCoreDelegate {
 
         let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0) }
         delegate?.transactionsUpdated(inserted: [], updated: transactionInfos)
+
+        // Mark used addresses
+        var usedAddresses: [Int: Int] = Dictionary()
+        for transaction in transactions {
+            guard transaction.direction == .in else { continue }
+            for index in transaction.subaddrIndices {
+                usedAddresses[index] = (usedAddresses[index] ?? 0) + 1
+            }
+        }
+
+        for (index, txCount) in usedAddresses {
+            storage.setAddressTransactionsCount(index: index, txCount: txCount)
+        }
     }
 }
 
@@ -149,6 +172,7 @@ public enum MoneroKitError: Error {
 
 public protocol MoneroKitDelegate: AnyObject {
     func balanceDidChange(balanceInfo: BalanceInfo)
+    func subAddressesUpdated(subaddresses: [SubAddress])
     func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo])
     func walletStateDidChange(state: WalletState)
 }

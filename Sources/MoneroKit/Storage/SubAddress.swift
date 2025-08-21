@@ -1,13 +1,15 @@
 import Foundation
 import GRDB
 
-class SubAddress: Record {
-    var account: Int
-    var address: String
+public class SubAddress: Record {
+    public var address: String
+    public var index: Int
+    public var transactionsCount: Int
 
-    init(account: Int, address: String) {
-        self.account = account
+    init(address: String, index: Int, transactionsCount: Int = 0) {
         self.address = address
+        self.index = index
+        self.transactionsCount = transactionsCount
 
         super.init()
     }
@@ -17,19 +19,22 @@ class SubAddress: Record {
     }
 
     enum Columns: String, ColumnExpression, CaseIterable {
-        case account
         case address
+        case index
+        case transactionsCount
     }
 
     required init(row: Row) throws {
-        account = row[Columns.account]
         address = row[Columns.address]
+        index = row[Columns.index]
+        transactionsCount = row[Columns.transactionsCount]
 
         try super.init(row: row)
     }
 
     override open func encode(to container: inout PersistenceContainer) throws {
-        container[Columns.account] = account
         container[Columns.address] = address
+        container[Columns.index] = index
+        container[Columns.transactionsCount] = transactionsCount
     }
 }
