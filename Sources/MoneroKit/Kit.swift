@@ -83,8 +83,8 @@ public class Kit {
             .map { TransactionInfo(transaction: $0) }
     }
 
-    public func send(to address: String, amount: SendAmount, priority: SendPriority = .default) throws {
-        try moneroCore.send(to: address, amount: amount, priority: priority)
+    public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws {
+        try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo)
     }
 
     public func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
@@ -131,6 +131,7 @@ extension Kit: MoneroCoreDelegate {
                 isPending: transaction.isPending,
                 isFailed: transaction.isFailed,
                 timestamp: Int(transaction.timestamp.timeIntervalSince1970),
+                note: transaction.note,
                 recipientAddress: recipientAddress
             )
         }

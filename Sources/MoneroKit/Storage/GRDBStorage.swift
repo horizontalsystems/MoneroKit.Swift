@@ -60,6 +60,12 @@ class GrdbStorage {
             }
         }
 
+        migrator.registerMigration("addNoteToTransactions") { db in
+            try db.alter(table: Transaction.databaseTableName) { t in
+                t.add(column: Transaction.Columns.note.name, .text)
+            }
+        }
+
         return migrator
     }
 

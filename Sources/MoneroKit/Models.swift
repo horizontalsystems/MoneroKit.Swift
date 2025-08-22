@@ -26,6 +26,7 @@ public struct TransactionInfo {
     public let isPending: Bool
     public let isFailed: Bool
     public let timestamp: Int
+    public let memo: String?
     public let recipientAddress: String?
 
     init(transaction: Transaction) {
@@ -38,6 +39,7 @@ public struct TransactionInfo {
         isPending = transaction.isPending
         isFailed = transaction.isFailed
         timestamp = transaction.timestamp
+        memo = transaction.note
         recipientAddress = transaction.recipientAddress
     }
 }

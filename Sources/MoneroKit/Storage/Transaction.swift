@@ -19,9 +19,10 @@ class Transaction: Record {
     var isPending: Bool
     var isFailed: Bool
     var timestamp: Int
+    var note: String?
     var recipientAddress: String?
 
-    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, recipientAddress: String?) {
+    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, note: String?, recipientAddress: String?) {
         uid = UUID().uuidString
         self.hash = hash
         self.type = type
@@ -31,13 +32,14 @@ class Transaction: Record {
         self.isPending = isPending
         self.isFailed = isFailed
         self.timestamp = timestamp
+        self.note = note
         self.recipientAddress = recipientAddress
 
         super.init()
     }
 
     convenience init(timestamp: Int? = nil) {
-        self.init(hash: "", type: .outgoing, blockHeight: 0, amount: 0, fee: 0, isPending: true, isFailed: false, timestamp: timestamp ?? Int(Date().timeIntervalSince1970), recipientAddress: nil)
+        self.init(hash: "", type: .outgoing, blockHeight: 0, amount: 0, fee: 0, isPending: true, isFailed: false, timestamp: timestamp ?? Int(Date().timeIntervalSince1970), note: nil, recipientAddress: nil)
     }
 
     override open class var databaseTableName: String {
@@ -54,6 +56,7 @@ class Transaction: Record {
         case isPending
         case isFailed
         case timestamp
+        case note
         case recipientAddress
     }
 
@@ -67,6 +70,7 @@ class Transaction: Record {
         isPending = row[Columns.isPending]
         isFailed = row[Columns.isFailed]
         timestamp = row[Columns.timestamp]
+        note = row[Columns.note]
         recipientAddress = row[Columns.recipientAddress]
 
         try super.init(row: row)
@@ -82,6 +86,7 @@ class Transaction: Record {
         container[Columns.isPending] = isPending
         container[Columns.isFailed] = isFailed
         container[Columns.timestamp] = timestamp
+        container[Columns.note] = note
         container[Columns.recipientAddress] = recipientAddress
     }
 }

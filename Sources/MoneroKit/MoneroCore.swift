@@ -286,6 +286,9 @@ class MoneroCore {
                 subaddrIndices = subaddrIndicesStr.split(separator: " ").compactMap { Int($0) }
             }
 
+            var note: String? = stringFromCString(MONERO_Wallet_getUserNote(walletPtr, hash))
+            if let _note = note, _note.isEmpty { note = nil }
+
             let transaction = Transaction(
                 direction: direction,
                 isPending: MONERO_TransactionInfo_isPending(txInfoPtr),
@@ -298,6 +301,7 @@ class MoneroCore {
                 confirmations: MONERO_TransactionInfo_confirmations(txInfoPtr),
                 hash: hash,
                 timestamp: Date(timeIntervalSince1970: TimeInterval(MONERO_TransactionInfo_timestamp(txInfoPtr))),
+                note: note,
                 transfers: transfers
             )
 
@@ -330,31 +334,40 @@ class MoneroCore {
         }
     }
 
-    func send(to address: String, amount: SendAmount, priority: SendPriority = .default) throws {
+    func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil) throws {
         guard let walletPtr = walletPointer else {
             throw MoneroCoreError.walletNotInitialized
         }
 
         let cAddress = (address as NSString).utf8String
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", amount.value, 0, Int32(priority.rawValue), 0, "", "")
+        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", amount.value, 0, Int32(priority.rawValue), account, "", "")
 
-        if let txPtr = pendingTxPtr {
-            let status = MONERO_PendingTransaction_status(txPtr)
-            if status == 0 {
-                if !MONERO_PendingTransaction_commit(txPtr, "", false) {
-                    let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown commit error"
-                    throw MoneroCoreError.transactionCommitFailed(error)
-                } else {
-                    try startStateManager()
-                }
-            } else {
-                let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown pending transaction error"
-                throw MoneroCoreError.match(error) ?? MoneroCoreError.transactionSendFailed(error)
-            }
-        } else {
+        guard let txPtr = pendingTxPtr else {
             let error = stringFromCString(MONERO_Wallet_errorString(walletPtr)) ?? "Unknown transaction creation error"
             throw MoneroCoreError.transactionSendFailed(error)
         }
+
+        let status = MONERO_PendingTransaction_status(txPtr)
+        guard status == 0 else {
+            let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown pending transaction error"
+            throw MoneroCoreError.match(error) ?? MoneroCoreError.transactionSendFailed(error)
+        }
+
+        if let memo {
+            let txIds = String(cString: MONERO_PendingTransaction_txid(pendingTxPtr, "|"))
+            let txId = txIds.split(separator: "|").first ?? ""
+            let cTxId = (txId as NSString).utf8String
+            let cNote = (memo as NSString).utf8String
+
+            MONERO_Wallet_setUserNote(walletPtr, cTxId, cNote)
+        }
+
+        guard MONERO_PendingTransaction_commit(txPtr, "", false) else {
+            let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown commit error"
+            throw MoneroCoreError.transactionCommitFailed(error)
+        }
+
+        try startStateManager()
     }
 
     func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
@@ -389,6 +402,7 @@ class MoneroCore {
         let confirmations: UInt64
         let hash: String
         let timestamp: Date
+        let note: String?
         var transfers: [Transfer]
     }
 
