@@ -416,6 +416,31 @@ extension MoneroCore {
     static func isValid(address: String, networkType: NetworkType) -> Bool {
         MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
     }
+
+    static func key(mnemonic: MoneroMnemonic, privateKey: Bool = false, spendKey: Bool = false) throws -> String? {
+        let resolvedSeedPhrase: String
+        let resolvedPassphrase: String
+
+        switch mnemonic {
+            case let .bip39(mnemonic, passphrase):
+                resolvedSeedPhrase = try legacySeedFromBip39(mnemonic: mnemonic, passphrase: passphrase)
+                resolvedPassphrase = ""
+
+            case let .legacy(mnemonic, passphrase):
+                resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
+                resolvedPassphrase = passphrase
+
+            case let .polyseed(mnemonic, passphrase):
+                resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
+                resolvedPassphrase = passphrase
+        }
+
+        let cSeed = strdup((resolvedSeedPhrase as NSString).utf8String)
+        let cPassphrase = strdup((resolvedPassphrase as NSString).utf8String)
+        let keyPtr = MONERO_Wallet_generateKey(cSeed, cPassphrase, privateKey, spendKey)
+
+        return stringFromCString(keyPtr)
+    }
 }
 
 protocol MoneroCoreDelegate: AnyObject {

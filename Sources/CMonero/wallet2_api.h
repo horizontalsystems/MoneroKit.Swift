@@ -728,6 +728,8 @@ struct Wallet
     virtual bool synchronized() const = 0;
 
     static std::string bytesToWords(const char *src);
+    static std::string generateKey(const std::string &seed, const std::string &seed_offset, const bool privateKey, const bool spendKey);
+
     static std::string displayAmount(uint64_t amount);
     static uint64_t amountFromString(const std::string &amount);
     static uint64_t amountFromDouble(double amount);

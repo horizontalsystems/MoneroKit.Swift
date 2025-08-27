@@ -164,6 +164,10 @@ public extension Kit {
     static func isValid(address: String, networkType: NetworkType) -> Bool {
         MoneroCore.isValid(address: address, networkType: networkType)
     }
+
+    static func key(mnemonic: MoneroMnemonic, privateKey: Bool, spendKey: Bool) throws -> String? {
+        try MoneroCore.key(mnemonic: mnemonic, privateKey: privateKey, spendKey: spendKey)
+    }
 }
 
 public enum MoneroKitError: Error {
