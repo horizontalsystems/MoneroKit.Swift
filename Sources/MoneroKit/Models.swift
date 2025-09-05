@@ -48,9 +48,14 @@ public struct BalanceInfo: Equatable {
     public let all: Int
     public let unlocked: Int
 
-    public init(all: UInt64, unlocked: UInt64) {
-        self.all = Int(all)
-        self.unlocked = Int(unlocked)
+    init(balance: Balance) {
+        all = balance.all
+        unlocked = balance.unlocked
+    }
+
+    init(all: Int, unlocked: Int) {
+        self.all = all
+        self.unlocked = unlocked
     }
 
     public static func == (lhs: BalanceInfo, rhs: BalanceInfo) -> Bool {
@@ -85,19 +90,29 @@ public enum WalletCoreStatus {
     }
 }
 
-public struct WalletState: Equatable {
-    public let status: WalletCoreStatus
-    public let daemonHeight: UInt64?
-    public let walletBlockHeight: UInt64?
-    public let isSynchronized: Bool
+public enum WalletState: Equatable {
+    case synced
+    case connecting(waiting: Bool)
+    case syncing(progress: Int, remainingBlocksCount: Int)
+    case notSynced(error: WalletStateError)
+    case idle(daemonReachable: Bool)
 
     public static func == (lhs: WalletState, rhs: WalletState) -> Bool {
-        switch (lhs.status, rhs.status) {
-        case (.unknown, .unknown), (.ok, .ok), (.error, .error), (.critical, .critical):
-            return lhs.daemonHeight == rhs.daemonHeight && lhs.walletBlockHeight == rhs.walletBlockHeight && lhs.isSynchronized == rhs.isSynchronized
+        switch (lhs, rhs) {
+        case (.synced, .synced): return true
+        case let (.connecting(lhsWaiting), .connecting(rhsWaiting)): return lhsWaiting == rhsWaiting
+        case let (.syncing(lhsProgress, lhsRemaining), .syncing(rhsProgress, rhsRemaining)): return lhsProgress == rhsProgress && lhsRemaining == rhsRemaining
+        case let (.notSynced(lhsError), .notSynced(rhsError)): return lhsError == rhsError
+        case let (.idle(lhsDaemonReachable), .idle(rhsDaemonReachable)): return lhsDaemonReachable == rhsDaemonReachable
         default: return false
         }
     }
+}
+
+public enum WalletStateError: Error, Equatable {
+    case notStarted
+    case startError(String?)
+    case statusError(String?)
 }
 
 public enum SendAmount {

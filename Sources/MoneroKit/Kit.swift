@@ -4,12 +4,16 @@ import HsToolKit
 public class Kit {
     public static let confirmationsThreshold: UInt64 = 10
     public static let lastBirthdayHeight: UInt64 = 3_480_000
+
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
+    private let kitId = UUID().uuidString
+    private let lifecycleQueue = DispatchQueue(label: "io.horizontalsystems.monero_kit.kit_lifecycle_queue", qos: .background)
+    private var started = false
 
     public weak var delegate: MoneroKitDelegate?
 
-    public init(mnemonic: MoneroMnemonic, account: UInt32, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
+    public init(mnemonic: MoneroMnemonic, account: UInt32, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
         let baseDirectoryName = "MoneroKit/\(walletId)/network_\(networkType.rawValue)"
         let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
 
@@ -32,43 +36,42 @@ public class Kit {
             node: node,
             restoreHeight: restoreHeight,
             networkType: networkType,
+            reachabilityManager: reachabilityManager,
             logger: logger,
             moneroCoreLogLevel: moneroCoreLogLevel
         )
 
         moneroCore.delegate = self
+
+        // TODO: Create 2 subaddresses if there's no address in storage
     }
 
-    public var restoreHeight: UInt64 {
-        moneroCore.restoreHeight
+    deinit {
+        _stop()
     }
 
-    public var balanceInfo: BalanceInfo {
-        moneroCore.balance
+    // Methods interacting with wallet cache in storage
+
+    public var lastBlockInfo: UInt64 {
+        guard let blockHeights = moneroCore.blockHeights else { return 0 }
+        return blockHeights.0
     }
 
     public var walletState: WalletState {
         moneroCore.state
     }
 
-    public var receiveAddress: String {
-        if let lastUsedAddress = storage.getLastUsedAddress() {
-            return moneroCore.address(index: lastUsedAddress.index + 1)
-        }
+    public var balanceInfo: BalanceInfo {
+        let balanceRecord = storage.getBalance()
+        return balanceRecord.map { BalanceInfo(balance: $0) } ?? .init(all: 0, unlocked: 0)
+    }
 
-        return moneroCore.address(index: 0)
+    public var receiveAddress: String {
+        storage.getLastUnusedAddress()?.address ?? ""
     }
 
     public var usedAddresses: [SubAddress] {
         storage.getAllAddresses()
-    }
-
-    public func start() {
-        try? moneroCore.start()
-    }
-
-    public func stop() {
-        moneroCore.stop()
     }
 
     public func transactions(fromHash: String? = nil, descending: Bool, type: TransactionFilterType?, limit: Int?) -> [TransactionInfo] {
@@ -83,6 +86,66 @@ public class Kit {
             .map { TransactionInfo(transaction: $0) }
     }
 
+    // Methods interacting with moneroCore
+
+    private func _start() {
+        guard !started else { return }
+        started = true
+
+        var kitState = KitManager.shared.checkAndGetInitialState(kitId: kitId)
+
+        while kitState == .waiting {
+            moneroCore.setConnectingState(waiting: true)
+            Thread.sleep(forTimeInterval: 1.0)
+            kitState = KitManager.shared.checkAndGetState(kitId: kitId)
+        }
+
+        if kitState == .running {
+            moneroCore.setConnectingState(waiting: false)
+            moneroCore.start()
+        }
+    }
+
+    private func _stop() {
+        guard started else { return }
+        started = false
+
+        moneroCore.stop()
+        KitManager.shared.removeRunning(kitId: kitId)
+    }
+
+    private func _restart() {
+        if case .idle = moneroCore.state { return }
+
+        _stop()
+
+        if !KitManager.shared.waitingKitExists() {
+            _start()
+        }
+    }
+
+    public func start() {
+        lifecycleQueue.async { [weak self] in self?._start() }
+    }
+
+    public func stop() {
+        lifecycleQueue.async { [weak self] in self?._stop() }
+    }
+
+    public func refresh() {
+        guard KitManager.shared.isRunning(kitId: kitId) else { return }
+
+        switch moneroCore.state {
+        case .connecting, .syncing, .synced: moneroCore.refresh()
+        case .notSynced: restart()
+        case .idle: ()
+        }
+    }
+
+    public func restart() {
+        lifecycleQueue.async { [weak self] in self?._restart() }
+    }
+
     public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws {
         try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo)
     }
@@ -95,19 +158,28 @@ public class Kit {
 extension Kit: MoneroCoreDelegate {
     func walletStateDidChange(state: WalletState) {
         delegate?.walletStateDidChange(state: state)
-        if let daemonHeight = state.daemonHeight, let walletBlockHeight = state.walletBlockHeight {
-            storage.update(blockHeights: BlockHeights(daemonHeight: Int(daemonHeight), walletHeight: Int(walletBlockHeight)))
+
+        if case .notSynced = state {
+            stop()
+        }
+
+        if let (walletHeight, daemonHeight) = moneroCore.blockHeights {
+            storage.update(blockHeights: BlockHeights(daemonHeight: Int(daemonHeight), walletHeight: Int(walletHeight)))
         }
     }
 
     func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress]) {
         let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index) }
-        storage.update(subAddresses: subAddresses)
-        delegate?.subAddressesUpdated(subaddresses: subAddresses)
+        if subAddresses.count >= 2 {
+            storage.update(subAddresses: subAddresses)
+            delegate?.subAddressesUpdated(subaddresses: subAddresses)
+        }
     }
 
-    func balanceDidChange(balanceInfo: BalanceInfo) {
-        delegate?.balanceDidChange(balanceInfo: balanceInfo)
+    func balanceDidChange(balance: MoneroCore.Balance) {
+        let balanceRecord = Balance(all: balance.all, unlocked: balance.unlocked)
+        storage.update(balance: balanceRecord)
+        delegate?.balanceDidChange(balanceInfo: BalanceInfo(balance: balanceRecord))
     }
 
     func transactionsDidChange(transactions: [MoneroCore.Transaction]) {
@@ -152,6 +224,13 @@ extension Kit: MoneroCoreDelegate {
 
         for (index, txCount) in usedAddresses {
             storage.setAddressTransactionsCount(index: index, txCount: txCount)
+        }
+
+        // Generate extra unused addresses
+        if let lastUsedAddressIndex = usedAddresses.keys.max() {
+            // We assume that there's at least 2 addresses in storage. Even if there's no transactions.
+            let extraAddress = moneroCore.address(index: lastUsedAddressIndex + 1)
+            storage.add(subAddress: SubAddress(address: extraAddress, index: lastUsedAddressIndex + 1))
         }
     }
 }

@@ -1,9 +1,12 @@
 import CMonero
+import Combine
 import Foundation
 import HsToolKit
 
 class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
+
+    private let globalEventQueue = DispatchQueue.global(qos: .userInteractive)
 
     private var mnemonic: MoneroMnemonic
     private var account: UInt32
@@ -17,11 +20,11 @@ class MoneroCore {
     private var node: Node
     private let logger: Logger?
     private let moneroCoreLogLevel: Int32? // 0..4
-    var restoreHeight: UInt64 = 0
+    private var restoreHeight: UInt64 = 0
 
     private var transactions: [Transaction] = [] {
         didSet {
-            DispatchQueue.main.async { [weak self] in
+            globalEventQueue.async { [weak self] in
                 guard let self else { return }
                 delegate?.transactionsDidChange(transactions: transactions)
             }
@@ -30,9 +33,20 @@ class MoneroCore {
 
     private var subAddresses: [SubAddress] = [] {
         didSet {
-            DispatchQueue.main.async { [weak self] in
+            globalEventQueue.async { [weak self] in
                 guard let self else { return }
                 delegate?.subAddresssesDidChange(subAddresses: subAddresses)
+            }
+        }
+    }
+
+    private var balance: Balance = .init(all: 0, unlocked: 0) {
+        didSet {
+            globalEventQueue.async { [weak self] in
+                guard let self else { return }
+                if oldValue != balance {
+                    delegate?.balanceDidChange(balance: balance)
+                }
             }
         }
     }
@@ -41,18 +55,11 @@ class MoneroCore {
         stateManager.state
     }
 
-    var balance: BalanceInfo = .init(all: 0, unlocked: 0) {
-        didSet {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if oldValue.all != balance.all || oldValue.unlocked != balance.unlocked {
-                    delegate?.balanceDidChange(balanceInfo: balance)
-                }
-            }
-        }
+    var blockHeights: (UInt64, UInt64)? {
+        stateManager.blockHeights
     }
 
-    init(mnemonic: MoneroMnemonic, account: UInt32, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, logger: Logger?, moneroCoreLogLevel: Int32?) {
+    init(mnemonic: MoneroMnemonic, account: UInt32, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, moneroCoreLogLevel: Int32?) {
         self.mnemonic = mnemonic
         self.account = account
         cWalletPath = strdup((walletPath as NSString).utf8String)
@@ -62,68 +69,31 @@ class MoneroCore {
         self.networkType = networkType
         self.logger = logger
         self.moneroCoreLogLevel = moneroCoreLogLevel
-        stateManager = SyncStateManager(logger: logger)
+        stateManager = SyncStateManager(logger: logger, restoreHeight: restoreHeight, reachabilityManager: reachabilityManager)
         walletListener = WalletListener()
-
         walletManagerPointer = MONERO_WalletManagerFactory_getWalletManager()
+
+        stateManager.onSyncStateChanged = { [weak self] in
+            self?.onSyncStateChanged()
+        }
+
+        walletListener.onNewTransaction = { [weak self] in
+            self?.startStateManager()
+        }
     }
 
     deinit {
         mnemonic.clear()
-        stop()
 
         // Free non-sensitive data
         if let ptr = cWalletPassword { free(ptr) }
         if let ptr = cWalletPath { free(ptr) }
-
-        if let walletPointer {
-            MONERO_Wallet_delete(walletPointer)
-            self.walletPointer = nil
-        }
     }
 
-    func start() throws {
-        guard walletManagerPointer != nil else {
-            logger?.error("Error: Could not get WalletManager instance.")
-            return
-        }
+    private func startStateManager() {
+        guard let walletPointer, let cWalletPassword else { return }
 
-        if walletPointer == nil {
-            try openWallet()
-        }
-
-        try startStateManager()
-        try startWalletListener()
-    }
-
-    func stop() {
-        stateManager.stop()
-        walletListener.stop()
-    }
-
-    func address(index: Int) -> String {
-        guard let walletPtr = walletPointer else { return "" }
-        return stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(index))) ?? ""
-    }
-
-    private func startStateManager() throws {
-        guard let walletPointer, let cWalletPassword else {
-            throw MoneroCoreError.walletNotInitialized
-        }
-
-        stateManager.start(walletPointer: walletPointer, cWalletPassword: cWalletPassword) { [weak self] in
-            self?.onSyncStateChanged()
-        }
-    }
-
-    private func startWalletListener() throws {
-        guard let walletPointer else {
-            throw MoneroCoreError.walletNotInitialized
-        }
-
-        walletListener.start(walletPointer: walletPointer) { [weak self] in
-            try? self?.startStateManager()
-        }
+        stateManager.start(walletPointer: walletPointer, cWalletPassword: cWalletPassword)
     }
 
     private func openWallet() throws {
@@ -207,47 +177,49 @@ class MoneroCore {
 
         walletPointer = recoveredWalletPtr
         mnemonic.clear()
-        updateBalance()
     }
 
     private func onSyncStateChanged() {
-        DispatchQueue.main.async { [weak self] in
+        globalEventQueue.async { [weak self] in
             guard let self else { return }
             delegate?.walletStateDidChange(state: state)
         }
 
-        if stateManager.state.isSynchronized {
+        switch state {
+        case .connecting, .notSynced: ()
+
+        case .synced:
             stateManager.stop()
-            fetchSubaddresses()
+            refresh()
+            stateManager.walletStored()
+
+        case .syncing:
+            if stateManager.chunkOfBlocksSynced {
+                refresh()
+                stateManager.walletStored()
+            }
+
+        case let .idle(daemonReachable):
+            daemonReachable ? startWalletServices() : stopWalletServices()
         }
-
-        if stateManager.state.isSynchronized || stateManager.chunkOfBlocksSynced {
-            fetchTransactions()
-            storeWallet()
-            updateBalance()
-            stateManager.syncCached()
-        }
     }
 
-    private func storeWallet() {
-        guard let _walletPtr = walletPointer else { return }
-        _ = MONERO_Wallet_store(_walletPtr, cWalletPath)
+    private func storeWallet(walletPointer: UnsafeMutableRawPointer) {
+        _ = MONERO_Wallet_store(walletPointer, cWalletPath)
     }
 
-    private func updateBalance() {
-        guard let walletPtr = walletPointer else { return }
-        let allBalance = MONERO_Wallet_balance(walletPtr, account)
-        let unlocked = MONERO_Wallet_unlockedBalance(walletPtr, account)
-        balance = BalanceInfo(all: allBalance, unlocked: unlocked)
+    private func updateBalance(walletPointer: UnsafeMutableRawPointer) {
+        let allBalance = MONERO_Wallet_balance(walletPointer, account)
+        let unlocked = MONERO_Wallet_unlockedBalance(walletPointer, account)
+        balance = Balance(all: allBalance, unlocked: unlocked)
     }
 
-    private func fetchSubaddresses() {
-        guard let walletPtr = walletPointer else { return }
+    private func fetchSubaddresses(walletPointer: UnsafeMutableRawPointer) {
         var fetchedAddresses: [SubAddress] = []
-        let count = MONERO_Wallet_numSubaddresses(walletPtr, account)
+        let count = MONERO_Wallet_numSubaddresses(walletPointer, account)
 
         for i in 0 ..< count {
-            if let address = stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(i))) {
+            if let address = stringFromCString(MONERO_Wallet_address(walletPointer, UInt64(account), UInt64(i))) {
                 fetchedAddresses.append(.init(address: address, index: i))
             }
         }
@@ -255,10 +227,8 @@ class MoneroCore {
         subAddresses = fetchedAddresses
     }
 
-    private func fetchTransactions() {
-        guard let walletPtr = walletPointer else { return }
-
-        let historyPtr = MONERO_Wallet_history(walletPtr)
+    private func fetchTransactions(walletPointer: UnsafeMutableRawPointer) {
+        let historyPtr = MONERO_Wallet_history(walletPointer)
         MONERO_TransactionHistory_refresh(historyPtr)
 
         let count = MONERO_TransactionHistory_count(historyPtr)
@@ -286,7 +256,7 @@ class MoneroCore {
                 subaddrIndices = subaddrIndicesStr.split(separator: " ").compactMap { Int($0) }
             }
 
-            var note: String? = stringFromCString(MONERO_Wallet_getUserNote(walletPtr, hash))
+            var note: String? = stringFromCString(MONERO_Wallet_getUserNote(walletPointer, hash))
             if let _note = note, _note.isEmpty { note = nil }
 
             let transaction = Transaction(
@@ -327,11 +297,70 @@ class MoneroCore {
             }
         }
 
-        if hasUnconfirmedTransactions, biggestConfirmations < Kit.confirmationsThreshold,
-           let height = stateManager.state.walletBlockHeight
-        {
-            walletListener.setLockedBalanceHeight(height: height - biggestConfirmations)
+        if hasUnconfirmedTransactions, biggestConfirmations < Kit.confirmationsThreshold {
+            walletListener.setLockedBalanceHeight(height: stateManager.walletHeight - biggestConfirmations)
         }
+    }
+
+    private func startCore() {
+        guard walletPointer == nil else { return }
+        do {
+            try openWallet()
+        } catch {
+            stateManager.state = .notSynced(error: .startError(error.localizedDescription))
+        }
+    }
+
+    private func stopCore() {
+        guard let wmp = walletManagerPointer, let wp = walletPointer else { return }
+
+        MONERO_WalletManager_closeWallet(wmp, wp, false)
+        walletPointer = nil
+    }
+
+    private func startWalletServices() {
+        guard let walletPointer else { return }
+        stateManager.state = .connecting(waiting: false)
+        startStateManager()
+        walletListener.start(walletPointer: walletPointer)
+    }
+
+    private func stopWalletServices() {
+        stateManager.stop()
+        walletListener.stop()
+    }
+
+    func start() {
+        guard walletManagerPointer != nil else {
+            logger?.error("Error: Could not get WalletManager instance.")
+            return
+        }
+
+        stateManager.validateReachable()
+        startCore()
+        startWalletServices()
+    }
+
+    func stop() {
+        stopWalletServices()
+        stopCore()
+    }
+
+    func refresh() {
+        guard let walletPtr = walletPointer else { return }
+        updateBalance(walletPointer: walletPtr)
+        fetchSubaddresses(walletPointer: walletPtr)
+        fetchTransactions(walletPointer: walletPtr)
+        storeWallet(walletPointer: walletPtr)
+    }
+
+    func setConnectingState(waiting: Bool) {
+        stateManager.state = .connecting(waiting: waiting)
+    }
+
+    func address(index: Int) -> String {
+        guard let walletPtr = walletPointer else { return "" }
+        return stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(index))) ?? ""
     }
 
     func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil) throws {
@@ -367,7 +396,7 @@ class MoneroCore {
             throw MoneroCoreError.transactionCommitFailed(error)
         }
 
-        try startStateManager()
+        startStateManager()
     }
 
     func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
@@ -410,6 +439,20 @@ class MoneroCore {
         let address: String
         let index: Int
     }
+
+    struct Balance: Equatable {
+        let all: Int
+        let unlocked: Int
+
+        init(all: UInt64, unlocked: UInt64) {
+            self.all = Int(all)
+            self.unlocked = Int(unlocked)
+        }
+
+        static func == (lhs: Balance, rhs: Balance) -> Bool {
+            lhs.all == rhs.all && lhs.unlocked == rhs.unlocked
+        }
+    }
 }
 
 extension MoneroCore {
@@ -422,17 +465,17 @@ extension MoneroCore {
         let resolvedPassphrase: String
 
         switch mnemonic {
-            case let .bip39(mnemonic, passphrase):
-                resolvedSeedPhrase = try legacySeedFromBip39(mnemonic: mnemonic, passphrase: passphrase)
-                resolvedPassphrase = ""
+        case let .bip39(mnemonic, passphrase):
+            resolvedSeedPhrase = try legacySeedFromBip39(mnemonic: mnemonic, passphrase: passphrase)
+            resolvedPassphrase = ""
 
-            case let .legacy(mnemonic, passphrase):
-                resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
-                resolvedPassphrase = passphrase
+        case let .legacy(mnemonic, passphrase):
+            resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
+            resolvedPassphrase = passphrase
 
-            case let .polyseed(mnemonic, passphrase):
-                resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
-                resolvedPassphrase = passphrase
+        case let .polyseed(mnemonic, passphrase):
+            resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
+            resolvedPassphrase = passphrase
         }
 
         let cSeed = strdup((resolvedSeedPhrase as NSString).utf8String)
@@ -444,7 +487,7 @@ extension MoneroCore {
 }
 
 protocol MoneroCoreDelegate: AnyObject {
-    func balanceDidChange(balanceInfo: BalanceInfo)
+    func balanceDidChange(balance: MoneroCore.Balance)
     func transactionsDidChange(transactions: [MoneroCore.Transaction])
     func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress])
     func walletStateDidChange(state: WalletState)

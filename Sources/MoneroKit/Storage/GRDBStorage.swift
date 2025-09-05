@@ -66,6 +66,16 @@ class GrdbStorage {
             }
         }
 
+        migrator.registerMigration("createBalance") { db in
+            try db.create(table: Balance.databaseTableName) { t in
+                t.column(Balance.Columns.id.name, .text).notNull()
+                t.column(Balance.Columns.all.name, .text).notNull()
+                t.column(Balance.Columns.unlocked.name, .text).notNull()
+
+                t.primaryKey([Balance.Columns.id.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 
@@ -108,9 +118,29 @@ class GrdbStorage {
     func update(subAddresses: [SubAddress]) {
         try! dbPool.write { db in
             try SubAddress.deleteAll(db)
-            for subAddresses in subAddresses {
-                try subAddresses.insert(db)
+            for subAddress in subAddresses {
+                try subAddress.insert(db)
             }
+        }
+    }
+
+    func add(subAddress: SubAddress) {
+        try! dbPool.write { db in
+            try subAddress.insert(db)
+        }
+    }
+
+    func update(balance: Balance) {
+        try! dbPool.write { db in
+            try Balance.deleteAll(db)
+            try balance.insert(db)
+        }
+    }
+
+    func update(blockHeights: BlockHeights) {
+        try! dbPool.write { db in
+            try BlockHeights.deleteAll(db)
+            try blockHeights.insert(db)
         }
     }
 
@@ -126,9 +156,9 @@ class GrdbStorage {
         }
     }
 
-    func getLastUsedAddress() -> SubAddress? {
+    func getLastUnusedAddress() -> SubAddress? {
         try! dbPool.read { db in
-            try SubAddress.filter(SubAddress.Columns.transactionsCount > 0).order(SubAddress.Columns.index.desc).fetchOne(db)
+            try SubAddress.filter(SubAddress.Columns.transactionsCount == 0).order(SubAddress.Columns.index.desc).fetchOne(db)
         }
     }
 
@@ -138,10 +168,9 @@ class GrdbStorage {
         }
     }
 
-    func update(blockHeights: BlockHeights) {
-        try! dbPool.write { db in
-            try BlockHeights.deleteAll(db)
-            try blockHeights.insert(db)
+    func getBalance() -> Balance? {
+        try! dbPool.read { db in
+            try Balance.fetchOne(db)
         }
     }
 

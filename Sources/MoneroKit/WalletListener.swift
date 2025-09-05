@@ -4,17 +4,17 @@ import Foundation
 class WalletListener {
     private var walletListenerPointer: UnsafeMutableRawPointer?
     private var walletPointer: UnsafeMutableRawPointer?
-    private var onNewTransaction: (() -> Void)?
-    private var timer: Timer?
     private var isRunning = false
     private var lockedBalanceBlockHeight: UInt64?
     private let queue = DispatchQueue(label: "monero.kit.wallet-listener-queue", qos: .userInitiated)
+    var onNewTransaction: (() -> Void)?
 
     private func checkListener() {
         guard let walletListenerPointer else { return }
-        let hasNewTransaction = MONERO_cw_WalletListener_isNewTransactionExist(walletListenerPointer)
 
+        let hasNewTransaction = MONERO_cw_WalletListener_isNewTransactionExist(walletListenerPointer)
         if hasNewTransaction {
+            // Has new transaction
             onNewTransaction?()
             MONERO_cw_WalletListener_resetIsNewTransactionExist(walletListenerPointer)
         }
@@ -22,41 +22,39 @@ class WalletListener {
         if let height = lockedBalanceBlockHeight {
             let newHeight = MONERO_cw_WalletListener_height(walletListenerPointer)
             if newHeight > height, newHeight - height >= Kit.confirmationsThreshold {
+                // Previously confirmed transaction has enough confirmations for the locked balance to be updated.
                 onNewTransaction?()
                 lockedBalanceBlockHeight = nil
             }
         }
+
+        scheduleNextCheck()
     }
 
-    func start(walletPointer: UnsafeMutableRawPointer, onNewTransaction: @escaping () -> Void) {
+    private func scheduleNextCheck() {
+        guard isRunning else { return }
+
+        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+            self?.checkListener()
+        }
+    }
+
+    func start(walletPointer: UnsafeMutableRawPointer?) {
         guard !isRunning else { return }
         isRunning = true
 
         self.walletPointer = walletPointer
-        self.onNewTransaction = onNewTransaction
 
         walletListenerPointer = MONERO_cw_getWalletListener(walletPointer)
         MONERO_Wallet_startRefresh(walletPointer)
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            timer?.invalidate()
-            timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-                self?.queue.async { [weak self] in
-                    guard let self else { return }
-
-                    checkListener()
-                }
-            }
-        }
+        scheduleNextCheck()
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        isRunning = false
         onNewTransaction = nil
         walletListenerPointer = nil
-        isRunning = false
 
         if let walletPointer {
             MONERO_Wallet_stop(walletPointer)
