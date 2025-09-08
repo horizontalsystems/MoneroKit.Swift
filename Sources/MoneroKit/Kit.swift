@@ -82,6 +82,20 @@ public class Kit {
         storage.getAllAddresses()
     }
 
+    public var statusInfo: [(String, Any)] {
+        var status = [(String, Any)]()
+
+        let (walletHeight, daemonHeight) = moneroCore.blockHeights.map { ("\($0)", "\($1)") } ?? ("n/a", "n/a")
+        status.append(("Wallet Status", walletState.description))
+        status.append(("Last Block Height", "\(lastBlockInfo)"))
+        status.append(("Wallet Height", walletHeight))
+        status.append(("Daemon Height", daemonHeight))
+        status.append(("Kit started", started ? "yes" : "no"))
+        status.append(("Node", moneroCore.node.description))
+
+        return status
+    }
+
     public func transactions(fromHash: String? = nil, descending: Bool, type: TransactionFilterType?, limit: Int?) -> [TransactionInfo] {
         var resolvedTimestamp: Int?
 

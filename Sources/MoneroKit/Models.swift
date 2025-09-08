@@ -106,12 +106,30 @@ public enum WalletState: Equatable {
         default: return false
         }
     }
+
+    var description: String {
+        switch self {
+            case .synced: return "Synced"
+            case let .connecting(waiting): return waiting ? "Connecting (waiting)" : "Connecting"
+            case let .syncing(progress, remainingBlocksCount): return "Syncing (\(progress)%, remaining blocks: \(remainingBlocksCount))"
+            case .notSynced(error: let error): return "Not synced (\(error.description))"
+            case .idle(daemonReachable: let daemonReachable): return "Idle daemon (\(daemonReachable ? "reachable" : "unreachable"))"
+        }
+    }
 }
 
 public enum WalletStateError: Error, Equatable {
     case notStarted
     case startError(String?)
     case statusError(String?)
+
+    var description: String {
+        switch self {
+            case .notStarted: return "Not started"
+            case let .startError(message): return "Start error: \(message ?? "No message")"
+            case let .statusError(message): return "Status error: \(message ?? "No message")"
+        }
+    }
 }
 
 public enum SendAmount {

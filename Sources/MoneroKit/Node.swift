@@ -12,4 +12,8 @@ public struct Node {
         self.login = login
         self.password = password
     }
+
+    public var description: String {
+        "\(url.absoluteString) (\(isTrusted ? "trusted" : "untrusted")) \(login == nil ? "no credentials" : "has credentials")"
+    }
 }

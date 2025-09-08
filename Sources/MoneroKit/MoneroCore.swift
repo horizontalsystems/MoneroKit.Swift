@@ -17,10 +17,10 @@ class MoneroCore {
     private var walletPointer: UnsafeMutableRawPointer?
     private var cWalletPath: UnsafeMutablePointer<CChar>?
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
-    private var node: Node
     private let logger: Logger?
     private let moneroCoreLogLevel: Int32? // 0..4
     private var restoreHeight: UInt64 = 0
+    var node: Node
 
     private var transactions: [Transaction] = [] {
         didSet {
