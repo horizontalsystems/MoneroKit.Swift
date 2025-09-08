@@ -61,8 +61,12 @@ public class Kit {
     // Methods interacting with wallet cache in storage
 
     public var lastBlockInfo: UInt64 {
-        guard let blockHeights = moneroCore.blockHeights else { return 0 }
-        return blockHeights.0
+        var walletHeight = moneroCore.blockHeights?.0
+        if walletHeight == nil {
+            walletHeight = storage.getBlockHeights().map { UInt64($0.walletHeight) }
+        }
+
+        return walletHeight ?? 0
     }
 
     public var walletState: WalletState {
@@ -86,8 +90,10 @@ public class Kit {
         var status = [(String, Any)]()
 
         let (walletHeight, daemonHeight) = moneroCore.blockHeights.map { ("\($0)", "\($1)") } ?? ("n/a", "n/a")
+        let lastSyncedWalletHeight = storage.getBlockHeights().map { "\($0.walletHeight)" } ?? "n/a"
         status.append(("Wallet Status", walletState.description))
         status.append(("Last Block Height", "\(lastBlockInfo)"))
+        status.append(("Last Synced Wallet Height", lastSyncedWalletHeight))
         status.append(("Wallet Height", walletHeight))
         status.append(("Daemon Height", daemonHeight))
         status.append(("Kit started", started ? "yes" : "no"))
@@ -206,14 +212,13 @@ extension Kit: MoneroCoreDelegate {
 
     func transactionsDidChange(transactions: [MoneroCore.Transaction]) {
         let transactionRecords = transactions.compactMap { transaction in
-            var type = transaction.direction == .in ? TransactionType.incoming : .outgoing
+            let type = transaction.direction == .in ? TransactionType.incoming : .outgoing
             var recipientAddress: String? = nil
 
-            if let transfer = transaction.transfers.first {
-                if storage.addressExists(transfer.address) {
-                    recipientAddress = transfer.address
-                    type = .sentToSelf
-                }
+            if type == .incoming,
+                let subAddressIndex = transaction.subaddrIndices.first,
+                let address = storage.getAddress(index: subAddressIndex) {
+                recipientAddress = address.address
             }
 
             return Transaction(

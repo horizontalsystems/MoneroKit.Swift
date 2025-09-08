@@ -162,6 +162,12 @@ class GrdbStorage {
         }
     }
 
+    func getAddress(index: Int) -> SubAddress? {
+        try! dbPool.read { db in
+            try SubAddress.filter(SubAddress.Columns.index == index).fetchOne(db)
+        }
+    }
+
     func getAllAddresses() -> [SubAddress] {
         try! dbPool.read { db in
             try SubAddress.order(SubAddress.Columns.index.asc).fetchAll(db)
