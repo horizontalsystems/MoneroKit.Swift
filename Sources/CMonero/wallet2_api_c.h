@@ -603,6 +603,7 @@ extern ADDAPI uint64_t MONERO_Wallet_daemonBlockChainTargetHeight(void* wallet_p
 extern ADDAPI bool MONERO_Wallet_synchronized(void* wallet_ptr);
 
 extern ADDAPI const char* MONERO_Wallet_bytesToWords(const char *src);
+extern ADDAPI const char* MONERO_Wallet_generateAddress(const char* seed, const char* seed_offset, uint32_t accountIndex, uint32_t addressIndex, bool testnet);
 extern ADDAPI const char* MONERO_Wallet_generateKey(const char* seed, const char* seed_offset, const bool privateKey, const bool spendKey);
 
 //     static std::string displayAmount(uint64_t amount);

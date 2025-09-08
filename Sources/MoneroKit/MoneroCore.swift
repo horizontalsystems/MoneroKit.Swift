@@ -456,11 +456,7 @@ class MoneroCore {
 }
 
 extension MoneroCore {
-    static func isValid(address: String, networkType: NetworkType) -> Bool {
-        MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
-    }
-
-    static func key(mnemonic: MoneroMnemonic, privateKey: Bool = false, spendKey: Bool = false) throws -> String? {
+    private static func resolveMnemonic(mnemonic: MoneroMnemonic) throws -> (String, String) {
         let resolvedSeedPhrase: String
         let resolvedPassphrase: String
 
@@ -478,11 +474,29 @@ extension MoneroCore {
             resolvedPassphrase = passphrase
         }
 
+        return (resolvedSeedPhrase, resolvedPassphrase)
+    }
+
+    static func isValid(address: String, networkType: NetworkType) -> Bool {
+        MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
+    }
+
+    static func key(mnemonic: MoneroMnemonic, privateKey: Bool = false, spendKey: Bool = false) throws -> String? {
+        let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: mnemonic)
+
         let cSeed = strdup((resolvedSeedPhrase as NSString).utf8String)
         let cPassphrase = strdup((resolvedPassphrase as NSString).utf8String)
         let keyPtr = MONERO_Wallet_generateKey(cSeed, cPassphrase, privateKey, spendKey)
 
         return stringFromCString(keyPtr)
+    }
+
+    static func address(mnemonic: MoneroMnemonic, account: UInt32, index: UInt32, networkType: NetworkType) throws -> String {
+        let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: mnemonic)
+        let testnet = networkType != .mainnet
+        let cAddressString = MONERO_Wallet_generateAddress(resolvedSeedPhrase, resolvedPassphrase, account, index, testnet)
+
+        return stringFromCString(cAddressString) ?? ""
     }
 }
 

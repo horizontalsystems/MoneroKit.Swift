@@ -1430,6 +1430,16 @@ const char* MONERO_Wallet_bytesToWords(const char *src) {
     DEBUG_END()
 }
 
+const char* MONERO_Wallet_generateAddress(const char* seed, const char* seed_offset, uint32_t accountIndex, uint32_t addressIndex, bool testnet) {
+    DEBUG_START()
+    std::string str = Monero::Wallet::generateAddress(seed, seed_offset, accountIndex, addressIndex, testnet);
+    const std::string::size_type size = str.size();
+    char *buffer = new char[size + 1];
+    memcpy(buffer, str.c_str(), size + 1);
+    return buffer;
+    DEBUG_END()
+}
+
 const char* MONERO_Wallet_generateKey(const char* seed, const char* seed_offset, const bool privateKey, const bool spendKey) {
     DEBUG_START()
     std::string str = Monero::Wallet::generateKey(seed, seed_offset, privateKey, spendKey);

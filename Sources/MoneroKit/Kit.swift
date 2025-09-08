@@ -43,7 +43,15 @@ public class Kit {
 
         moneroCore.delegate = self
 
-        // TODO: Create 2 subaddresses if there's no address in storage
+        if storage.getAllAddresses().isEmpty {
+            let primaryAddress = try MoneroCore.address(mnemonic: mnemonic, account: account, index: 0, networkType: networkType)
+            storage.add(subAddress: SubAddress(address: primaryAddress, index: 0))
+
+            if account == 0 {
+                let firstSubAddress = try MoneroCore.address(mnemonic: mnemonic, account: account, index: 1, networkType: networkType)
+                storage.add(subAddress: SubAddress(address: firstSubAddress, index: 1))
+            }
+        }
     }
 
     deinit {
@@ -170,7 +178,7 @@ extension Kit: MoneroCoreDelegate {
 
     func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress]) {
         let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index) }
-        if subAddresses.count >= 2 {
+        if !subAddresses.isEmpty {
             storage.update(subAddresses: subAddresses)
             delegate?.subAddressesUpdated(subaddresses: subAddresses)
         }
