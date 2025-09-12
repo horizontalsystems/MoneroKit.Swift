@@ -1,7 +1,8 @@
-public enum MoneroMnemonic {
+public enum MoneroWallet {
     case bip39(seed: [String], passphrase: String)
     case legacy(seed: [String], passphrase: String)
     case polyseed(seed: [String], passphrase: String)
+    case watch(address: String, viewKey: String)
 
     mutating func clear() {
         switch self {
@@ -11,6 +12,8 @@ public enum MoneroMnemonic {
             self = .legacy(seed: [], passphrase: "")
         case .polyseed:
             self = .polyseed(seed: [], passphrase: "")
+        case .watch:
+            self = .watch(address: "", viewKey: "")
         }
     }
 }

@@ -5,7 +5,7 @@ import HsToolKit
 
 class SyncStateManager {
     static let storeBlocksCount: UInt64 = 2000
-    static let connectTimeout: TimeInterval = 15
+    static let connectTimeout: TimeInterval = 30
 
     private var cancellables = Set<AnyCancellable>()
     private var reachabilityManager: ReachabilityManager

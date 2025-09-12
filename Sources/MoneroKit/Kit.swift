@@ -3,7 +3,6 @@ import HsToolKit
 
 public class Kit {
     public static let confirmationsThreshold: UInt64 = 10
-    public static let lastBirthdayHeight: UInt64 = 3_480_000
 
     private let moneroCore: MoneroCore
     private let storage: GrdbStorage
@@ -13,7 +12,7 @@ public class Kit {
 
     public weak var delegate: MoneroKitDelegate?
 
-    public init(mnemonic: MoneroMnemonic, account: UInt32, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
+    public init(wallet: MoneroWallet, account: UInt32, restoreHeight: UInt64 = 0, walletId: String, node: Node, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, moneroCoreLogLevel: Int32? = nil) throws {
         let baseDirectoryName = "MoneroKit/\(walletId)/network_\(networkType.rawValue)"
         let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
 
@@ -29,7 +28,7 @@ public class Kit {
         let logger = logger ?? Logger(minLogLevel: .verbose)
 
         moneroCore = MoneroCore(
-            mnemonic: mnemonic,
+            wallet: wallet,
             account: account,
             walletPath: walletPath,
             walletPassword: walletId,
@@ -44,11 +43,15 @@ public class Kit {
         moneroCore.delegate = self
 
         if storage.getAllAddresses().isEmpty {
-            let primaryAddress = try MoneroCore.address(mnemonic: mnemonic, account: account, index: 0, networkType: networkType)
+            let primaryAddress = try MoneroCore.address(wallet: wallet, account: account, index: 0, networkType: networkType)
             storage.add(subAddress: SubAddress(address: primaryAddress, index: 0))
 
             if account == 0 {
-                let firstSubAddress = try MoneroCore.address(mnemonic: mnemonic, account: account, index: 1, networkType: networkType)
+                if case .watch = wallet {
+                    return
+                }
+
+                let firstSubAddress = try MoneroCore.address(wallet: wallet, account: account, index: 1, networkType: networkType)
                 storage.add(subAddress: SubAddress(address: firstSubAddress, index: 1))
             }
         }
@@ -216,8 +219,9 @@ extension Kit: MoneroCoreDelegate {
             var recipientAddress: String? = nil
 
             if type == .incoming,
-                let subAddressIndex = transaction.subaddrIndices.first,
-                let address = storage.getAddress(index: subAddressIndex) {
+               let subAddressIndex = transaction.subaddrIndices.first,
+               let address = storage.getAddress(index: subAddressIndex)
+            {
                 recipientAddress = address.address
             }
 
@@ -271,8 +275,12 @@ public extension Kit {
         MoneroCore.isValid(address: address, networkType: networkType)
     }
 
-    static func key(mnemonic: MoneroMnemonic, privateKey: Bool, spendKey: Bool) throws -> String? {
-        try MoneroCore.key(mnemonic: mnemonic, privateKey: privateKey, spendKey: spendKey)
+    static func isValid(viewKey: String, address: String, isViewKey: Bool, networkType: NetworkType) -> Bool {
+        MoneroCore.isValid(viewKey: viewKey, address: address, isViewKey: isViewKey, networkType: networkType)
+    }
+
+    static func key(wallet: MoneroWallet, privateKey: Bool, spendKey: Bool) throws -> String? {
+        try MoneroCore.key(wallet: wallet, privateKey: privateKey, spendKey: spendKey)
     }
 }
 

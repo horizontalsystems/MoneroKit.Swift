@@ -8,7 +8,7 @@ class MoneroCore {
 
     private let globalEventQueue = DispatchQueue.global(qos: .userInteractive)
 
-    private var mnemonic: MoneroMnemonic
+    private var wallet: MoneroWallet
     private var account: UInt32
     private var stateManager: SyncStateManager
     private var walletListener: WalletListener
@@ -59,8 +59,8 @@ class MoneroCore {
         stateManager.blockHeights
     }
 
-    init(mnemonic: MoneroMnemonic, account: UInt32, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, moneroCoreLogLevel: Int32?) {
-        self.mnemonic = mnemonic
+    init(wallet: MoneroWallet, account: UInt32, walletPath: String, walletPassword: String, node: Node, restoreHeight: UInt64, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, moneroCoreLogLevel: Int32?) {
+        self.wallet = wallet
         self.account = account
         cWalletPath = strdup((walletPath as NSString).utf8String)
         cWalletPassword = strdup((walletPassword as NSString).utf8String)
@@ -83,7 +83,7 @@ class MoneroCore {
     }
 
     deinit {
-        mnemonic.clear()
+        wallet.clear()
 
         // Free non-sensitive data
         if let ptr = cWalletPassword { free(ptr) }
@@ -109,7 +109,7 @@ class MoneroCore {
         if walletExists {
             recoveredWalletPtr = MONERO_WalletManager_openWallet(walletManagerPointer, cWalletPath, cWalletPassword, networkType.rawValue)
         } else {
-            switch mnemonic {
+            switch wallet {
             case let .bip39(mnemonic, passphrase):
                 let legacySeed = try legacySeedFromBip39(mnemonic: mnemonic, passphrase: passphrase)
 
@@ -152,6 +152,20 @@ class MoneroCore {
                     restoreHeight,
                     1
                 )
+
+            case let .watch(address, viewKey):
+                recoveredWalletPtr = MONERO_WalletManager_createWalletFromKeys(
+                    walletManagerPointer,
+                    cWalletPath,
+                    cWalletPassword,
+                    "",
+                    networkType.rawValue,
+                    restoreHeight,
+                    (address as NSString).utf8String,
+                    (viewKey as NSString).utf8String,
+                    "",
+                    1
+                )
             }
         }
 
@@ -176,7 +190,7 @@ class MoneroCore {
         MONERO_Wallet_setTrustedDaemon(walletPtr, node.isTrusted)
 
         walletPointer = recoveredWalletPtr
-        mnemonic.clear()
+        wallet.clear()
     }
 
     private func onSyncStateChanged() {
@@ -456,7 +470,7 @@ class MoneroCore {
 }
 
 extension MoneroCore {
-    private static func resolveMnemonic(mnemonic: MoneroMnemonic) throws -> (String, String) {
+    private static func resolveMnemonic(mnemonic: MoneroWallet) throws -> (String, String) {
         let resolvedSeedPhrase: String
         let resolvedPassphrase: String
 
@@ -472,6 +486,10 @@ extension MoneroCore {
         case let .polyseed(mnemonic, passphrase):
             resolvedSeedPhrase = mnemonic.joined(separator: " ").decomposedStringWithCompatibilityMapping
             resolvedPassphrase = passphrase
+
+        case .watch:
+            resolvedSeedPhrase = ""
+            resolvedPassphrase = ""
         }
 
         return (resolvedSeedPhrase, resolvedPassphrase)
@@ -481,22 +499,51 @@ extension MoneroCore {
         MONERO_Wallet_addressValid((address as NSString).utf8String, networkType.rawValue)
     }
 
-    static func key(mnemonic: MoneroMnemonic, privateKey: Bool = false, spendKey: Bool = false) throws -> String? {
-        let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: mnemonic)
-
-        let cSeed = strdup((resolvedSeedPhrase as NSString).utf8String)
-        let cPassphrase = strdup((resolvedPassphrase as NSString).utf8String)
-        let keyPtr = MONERO_Wallet_generateKey(cSeed, cPassphrase, privateKey, spendKey)
-
-        return stringFromCString(keyPtr)
+    static func isValid(viewKey: String, address: String, isViewKey: Bool, networkType: NetworkType) -> Bool {
+        MONERO_Wallet_keyValid((viewKey as NSString).utf8String, (address as NSString).utf8String, isViewKey, networkType.rawValue)
     }
 
-    static func address(mnemonic: MoneroMnemonic, account: UInt32, index: UInt32, networkType: NetworkType) throws -> String {
-        let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: mnemonic)
-        let testnet = networkType != .mainnet
-        let cAddressString = MONERO_Wallet_generateAddress(resolvedSeedPhrase, resolvedPassphrase, account, index, testnet)
+    static func key(wallet: MoneroWallet, privateKey: Bool = false, spendKey: Bool = false) throws -> String? {
+        switch wallet {
+        case .bip39, .legacy, .polyseed:
+            let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: wallet)
 
-        return stringFromCString(cAddressString) ?? ""
+            guard !resolvedSeedPhrase.isEmpty, !resolvedPassphrase.isEmpty else {
+                return nil
+            }
+
+            let cSeed = strdup((resolvedSeedPhrase as NSString).utf8String)
+            let cPassphrase = strdup((resolvedPassphrase as NSString).utf8String)
+            let keyPtr = MONERO_Wallet_generateKey(cSeed, cPassphrase, privateKey, spendKey)
+
+            return stringFromCString(keyPtr)
+
+        case let .watch(_, viewKey):
+            if privateKey, !spendKey {
+                return viewKey
+            } else {
+                return ""
+            }
+        }
+    }
+
+    static func address(wallet: MoneroWallet, account: UInt32, index: UInt32, networkType: NetworkType) throws -> String {
+        switch wallet {
+        case .bip39, .legacy, .polyseed:
+            let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: wallet)
+
+            let testnet = networkType != .mainnet
+            let cAddressString = MONERO_Wallet_generateAddress(resolvedSeedPhrase, resolvedPassphrase, account, index, testnet)
+
+            return stringFromCString(cAddressString) ?? ""
+
+        case let .watch(address, _):
+            if account == 0, index == 0 {
+                return address
+            } else {
+                return ""
+            }
+        }
     }
 }
 
