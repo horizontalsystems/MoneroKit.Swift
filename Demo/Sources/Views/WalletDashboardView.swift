@@ -8,9 +8,8 @@ struct WalletDashboardView: View {
     var body: some View {
         List {
             Section(header: Text("Wallet Status")) {
-                Text("Synchronized: \(walletState.isSynchronized ? "Yes" : "No")")
-                Text("Daemon Height: \(walletState.daemonHeight)")
-                Text("Wallet Height: \(walletState.lastBlockHeight)")
+                Text("State: \(stateDescription(walletState.walletState))")
+                Text("Wallet Height: \(moneroKit?.lastBlockInfo ?? 0)")
                 Text("Balance: \(Double(walletState.balance.unlocked) / 1_000_000_000_000) XMR")
             }
 
@@ -46,6 +45,16 @@ struct WalletDashboardView: View {
             }
         }
         .navigationTitle("Dashboard")
+    }
+
+    private func stateDescription(_ state: WalletState) -> String {
+        switch state {
+            case .connecting: return "Connecting..."
+            case .syncing(let progress, let remainingBlocksCount): return "Syncing (\(progress)%, \(remainingBlocksCount) blocks remaining)"
+            case .synced: return "Synced"
+            case .idle(let daemonReachable): return "Idle \(daemonReachable ? "🔹" : "❌")"
+            case .notSynced(let error): return "Not Synced: \(error)"
+        }
     }
 }
 

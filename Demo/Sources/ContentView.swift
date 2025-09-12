@@ -1,5 +1,6 @@
 import MoneroKit
 import SwiftUI
+import HsToolKit
 
 struct ContentView: View {
     @Binding var moneroKit: Kit?
@@ -9,7 +10,7 @@ struct ContentView: View {
     @State private var passphrase: String = ""
     @State private var walletId: String = "wallet1"
     @State private var daemonAddress: String = "http://xmr-node.cakewallet.com:18081"
-    @State private var restoreHeight: String = "\(MoneroKit.Kit.lastBirthdayHeight)"
+    @State private var restoreHeight: String = "\(RestoreHeight.getHeight(date: Date()))"
     @State private var mnemonicType: String = "BIP39"
 
     var body: some View {
@@ -41,24 +42,26 @@ struct ContentView: View {
         let node = Node(url: url, isTrusted: true)
         let seed = mnemonicSeed.components(separatedBy: " ")
 
-        let mnemonic: MoneroMnemonic
+        let wallet: MoneroWallet
         switch mnemonicType {
         case "BIP39":
-            mnemonic = .bip39(seed: seed, passphrase: passphrase)
+            wallet = .bip39(seed: seed, passphrase: passphrase)
         case "Legacy (25 words)":
-            mnemonic = .legacy(seed: seed, passphrase: passphrase)
+            wallet = .legacy(seed: seed, passphrase: passphrase)
         case "Polyseed (16 words)":
-            mnemonic = .polyseed(seed: seed, passphrase: passphrase)
+            wallet = .polyseed(seed: seed, passphrase: passphrase)
         default:
             return
         }
 
         guard let kit = try? Kit(
-            mnemonic: mnemonic,
+            wallet: wallet,
+            account: 0,
             restoreHeight: UInt64(restoreHeight) ?? 0,
             walletId: walletId,
             node: node,
             networkType: .mainnet,
+            reachabilityManager: ReachabilityManager(),
             logger: nil,
             moneroCoreLogLevel: 4
         ) else {

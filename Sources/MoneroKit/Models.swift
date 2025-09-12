@@ -53,7 +53,7 @@ public struct BalanceInfo: Equatable {
         unlocked = balance.unlocked
     }
 
-    init(all: Int, unlocked: Int) {
+    public init(all: Int, unlocked: Int) {
         self.all = all
         self.unlocked = unlocked
     }

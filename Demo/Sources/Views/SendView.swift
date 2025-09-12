@@ -5,6 +5,7 @@ struct SendView: View {
     @Binding var moneroKit: Kit?
     @State private var recipientAddress: String = "87mKVhsVc2ETP2g1VCd38mUeKpXkXkPT3B7tQ5aapCc1gNaZZZ5ZkHN5U92pnDom3i7QeJwUqGDCUPv1J51HojY29qZDFaX"
     @State private var amount: String = "0.001"
+    @State private var memo: String = ""
     @State private var estimatedFee: String?
     @State private var transactionStatus: String = ""
 
@@ -15,6 +16,7 @@ struct SendView: View {
                     .autocapitalization(.none)
                 TextField("Amount (XMR)", text: $amount)
                     .keyboardType(.decimalPad)
+                TextField("Memo (Optional)", text: $memo)
             }
 
             Section(header: Text("Fee Estimation")) {
@@ -36,7 +38,8 @@ struct SendView: View {
             Button("Confirm & Send") {
                 if let amountDouble = Double(amount) {
                     do {
-                        try moneroKit?.send(to: recipientAddress, amount: .value(Int(amountDouble * 1_000_000_000_000)))
+                        let sendMemo = memo.isEmpty ? nil : memo
+                        try moneroKit?.send(to: recipientAddress, amount: .value(Int(amountDouble * 1_000_000_000_000)), memo: sendMemo)
                         transactionStatus = "Transaction sent!"
                     } catch {
                         transactionStatus = "Error: \(error.localizedDescription)"
