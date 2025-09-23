@@ -508,7 +508,7 @@ extension MoneroCore {
         case .bip39, .legacy, .polyseed:
             let (resolvedSeedPhrase, resolvedPassphrase) = try resolveMnemonic(mnemonic: wallet)
 
-            guard !resolvedSeedPhrase.isEmpty, !resolvedPassphrase.isEmpty else {
+            guard !resolvedSeedPhrase.isEmpty else {
                 return nil
             }
 
