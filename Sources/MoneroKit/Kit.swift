@@ -200,11 +200,17 @@ extension Kit: MoneroCoreDelegate {
     }
 
     func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress]) {
-        let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index) }
-        if !subAddresses.isEmpty {
-            storage.update(subAddresses: subAddresses)
-            delegate?.subAddressesUpdated(subaddresses: subAddresses)
+        if moneroCore.account == 0 && subAddresses.count <= 1 {
+            // 0 account must keep 2 addresses created on Kit initialization
+            return
+        } else if subAddresses.count == 0 {
+            // > 0 accounts must keep 1 address created on Kit initialization
+            return
         }
+
+        let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index) }
+        storage.update(subAddresses: subAddresses)
+        delegate?.subAddressesUpdated(subaddresses: subAddresses)
     }
 
     func balanceDidChange(balance: MoneroCore.Balance) {

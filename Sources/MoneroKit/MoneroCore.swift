@@ -9,7 +9,6 @@ class MoneroCore {
     private let globalEventQueue = DispatchQueue.global(qos: .userInteractive)
 
     private var wallet: MoneroWallet
-    private var account: UInt32
     private var stateManager: SyncStateManager
     private var walletListener: WalletListener
     private var networkType: NetworkType = .mainnet
@@ -20,6 +19,7 @@ class MoneroCore {
     private let logger: Logger?
     private let moneroCoreLogLevel: Int32? // 0..4
     private var restoreHeight: UInt64 = 0
+    var account: UInt32
     var node: Node
 
     private var transactions: [Transaction] = [] {
