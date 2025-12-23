@@ -288,6 +288,10 @@ public extension Kit {
     static func key(wallet: MoneroWallet, privateKey: Bool, spendKey: Bool) throws -> String? {
         try MoneroCore.key(wallet: wallet, privateKey: privateKey, spendKey: spendKey)
     }
+
+    static func address(wallet: MoneroWallet, account: UInt32, index: UInt32) throws -> String? {
+        try MoneroCore.address(wallet: wallet, account: account, index: index, networkType: .mainnet)
+    }
 }
 
 public enum MoneroKitError: Error {
