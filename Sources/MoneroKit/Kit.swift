@@ -164,12 +164,16 @@ public class Kit {
     }
 
     public func refresh() {
-        guard KitManager.shared.isRunning(kitId: kitId) else { return }
+        lifecycleQueue.async { [weak self] in
+            guard let self,
+                  self.started,
+                  KitManager.shared.isRunning(kitId: self.kitId) else { return }
 
-        switch moneroCore.state {
-        case .connecting, .syncing, .synced: moneroCore.refresh()
-        case .notSynced: restart()
-        case .idle: ()
+            switch self.moneroCore.state {
+            case .connecting, .syncing, .synced: self.moneroCore.refresh()
+            case .notSynced: self.restart()
+            case .idle: ()
+            }
         }
     }
 
