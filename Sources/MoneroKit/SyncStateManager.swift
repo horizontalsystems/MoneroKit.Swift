@@ -14,7 +14,7 @@ class SyncStateManager {
     private var walletPointer: UnsafeMutableRawPointer?
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
 
-    private let queue = DispatchQueue(label: "io.horizontalsystems.monero_kit.core_state_queue", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "io.horizontalsystems.monero_kit.core_state_queue", qos: .background)
 
     private var connectStartTime: Date?
     private var backgroundSyncSetupSuccess: Bool = false

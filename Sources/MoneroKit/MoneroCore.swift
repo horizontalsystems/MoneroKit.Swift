@@ -6,7 +6,7 @@ import HsToolKit
 class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
 
-    private let globalEventQueue = DispatchQueue.global(qos: .userInteractive)
+    private let globalEventQueue = DispatchQueue.global(qos: .background)
 
     private var wallet: MoneroWallet
     private var stateManager: SyncStateManager

@@ -6,7 +6,7 @@ class WalletListener {
     private var walletPointer: UnsafeMutableRawPointer?
     private var isRunning = false
     private var lockedBalanceBlockHeight: UInt64?
-    private let queue = DispatchQueue(label: "monero.kit.wallet-listener-queue", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "monero.kit.wallet-listener-queue", qos: .background)
     var onNewTransaction: (() -> Void)?
 
     private func checkListener() {
