@@ -64,7 +64,7 @@ public struct BalanceInfo: Equatable {
 }
 
 public enum SendPriority: Int, CaseIterable {
-    case `default`, low, medium, high, last
+    case `default`, low, medium, high
 }
 
 public enum NetworkType: Int32, CaseIterable {
