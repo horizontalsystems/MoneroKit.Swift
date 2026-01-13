@@ -1,6 +1,6 @@
+import HsToolKit
 import MoneroKit
 import SwiftUI
-import HsToolKit
 
 struct ContentView: View {
     @Binding var moneroKit: Kit?

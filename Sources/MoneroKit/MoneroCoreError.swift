@@ -2,6 +2,8 @@ import Foundation
 
 public enum MoneroCoreError: Error {
     case walletNotInitialized
+    case walletRecoveryFailed(String)
+    case daemonInitFailed(String)
     case walletStatusError(String?)
     case insufficientFunds(String)
     case transactionEstimationFailed(String)

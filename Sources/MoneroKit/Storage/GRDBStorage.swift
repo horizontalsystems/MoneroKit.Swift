@@ -76,6 +76,16 @@ class GrdbStorage {
             }
         }
 
+        migrator.registerMigration("createPrivateTxData") { db in
+            try db.create(table: PrivateTxData.databaseTableName) { t in
+                t.column(PrivateTxData.Columns.txHash.name, .text).notNull()
+                t.column(PrivateTxData.Columns.txKey.name, .text).notNull()
+                t.column(PrivateTxData.Columns.recipientAddress.name, .text).notNull()
+
+                t.primaryKey([PrivateTxData.Columns.txHash.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 
@@ -183,6 +193,18 @@ class GrdbStorage {
     func getBlockHeights() -> BlockHeights? {
         try! dbPool.read { db in
             try BlockHeights.fetchOne(db)
+        }
+    }
+
+    func savePrivateTxData(_ data: PrivateTxData) {
+        try! dbPool.write { db in
+            try data.insert(db)
+        }
+    }
+
+    func getPrivateTxData(byHash hash: String) -> PrivateTxData? {
+        try! dbPool.read { db in
+            try PrivateTxData.filter(PrivateTxData.Columns.txHash == hash).fetchOne(db)
         }
     }
 }

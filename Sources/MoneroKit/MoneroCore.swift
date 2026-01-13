@@ -173,18 +173,31 @@ class MoneroCore {
             let errorCStr = MONERO_WalletManager_errorString(walletManagerPointer)
             let msg = stringFromCString(errorCStr) ?? "Unknown recovery error"
             logger?.error("Error recovering wallet: \(msg)")
-            return
+            throw MoneroCoreError.walletRecoveryFailed(msg)
         }
 
-        let cDaemonAddress = strdup((node.url.absoluteString as NSString).utf8String)
-        let cDaemonLogin = strdup(((node.login ?? "") as NSString).utf8String)
-        let cDaemonPassword = strdup(((node.password ?? "") as NSString).utf8String)
+        let daemonAddress = node.url.absoluteString
+        let daemonLogin = node.login ?? ""
+        let daemonPassword = node.password ?? ""
+
+        logger?.debug("Initializing wallet with daemon: \(daemonAddress)")
+
+        let cDaemonAddress = strdup((daemonAddress as NSString).utf8String)
+        let cDaemonLogin = strdup((daemonLogin as NSString).utf8String)
+        let cDaemonPassword = strdup((daemonPassword as NSString).utf8String)
+
+        defer {
+            free(cDaemonAddress)
+            free(cDaemonLogin)
+            free(cDaemonPassword)
+        }
+
         let initSuccess = MONERO_Wallet_init(walletPtr, cDaemonAddress, 0, cDaemonLogin, cDaemonPassword, true, false, "")
         guard initSuccess else {
             let errorCStr = MONERO_Wallet_errorString(walletPtr)
             let msg = stringFromCString(errorCStr) ?? "Unknown daemon init error"
             logger?.error("Error initializing wallet with daemon: \(msg)")
-            return
+            throw MoneroCoreError.daemonInitFailed(msg)
         }
 
         MONERO_Wallet_setTrustedDaemon(walletPtr, node.isTrusted)
@@ -243,6 +256,9 @@ class MoneroCore {
 
     private func fetchTransactions(walletPointer: UnsafeMutableRawPointer) {
         let historyPtr = MONERO_Wallet_history(walletPointer)
+
+        guard let historyPtr else { return }
+
         MONERO_TransactionHistory_refresh(historyPtr)
 
         let count = MONERO_TransactionHistory_count(historyPtr)
@@ -251,19 +267,12 @@ class MoneroCore {
         for i in 0 ..< count {
             let txInfoPtr = MONERO_TransactionHistory_transaction(historyPtr, i)
 
-            guard let direction = Transaction.Direction(rawValue: MONERO_TransactionInfo_direction(txInfoPtr)) else { continue }
+            guard let txInfoPtr else { continue }
+
+            let directionRaw = MONERO_TransactionInfo_direction(txInfoPtr)
+            guard let direction = Transaction.Direction(rawValue: directionRaw) else { continue }
+
             let hash = stringFromCString(MONERO_TransactionInfo_hash(txInfoPtr)) ?? "N/A"
-
-            var transfers: [Transfer] = []
-            let transferCount = MONERO_TransactionInfo_transfers_count(txInfoPtr)
-
-            if transferCount > 0 {
-                for j in 0 ..< transferCount {
-                    let transferAmount = MONERO_TransactionInfo_transfers_amount(txInfoPtr, j)
-                    let address = stringFromCString(MONERO_TransactionInfo_transfers_address(txInfoPtr, j)) ?? ""
-                    transfers.append(Transfer(address: address, amount: transferAmount))
-                }
-            }
 
             var subaddrIndices: [Int] = []
             if let subaddrIndicesStr = stringFromCString(MONERO_TransactionInfo_subaddrIndex(txInfoPtr, " ")) {
@@ -285,8 +294,7 @@ class MoneroCore {
                 confirmations: MONERO_TransactionInfo_confirmations(txInfoPtr),
                 hash: hash,
                 timestamp: Date(timeIntervalSince1970: TimeInterval(MONERO_TransactionInfo_timestamp(txInfoPtr))),
-                note: note,
-                transfers: transfers
+                note: note
             )
 
             if transaction.subaddrAccount == account {
@@ -312,7 +320,11 @@ class MoneroCore {
         }
 
         if hasUnconfirmedTransactions, biggestConfirmations < Kit.confirmationsThreshold {
-            walletListener.setLockedBalanceHeight(height: stateManager.walletHeight - biggestConfirmations)
+            if stateManager.walletHeight < biggestConfirmations {
+                walletListener.setLockedBalanceHeight(height: stateManager.walletHeight)
+            } else {
+                walletListener.setLockedBalanceHeight(height: stateManager.walletHeight - biggestConfirmations)
+            }
         }
     }
 
@@ -377,7 +389,13 @@ class MoneroCore {
         return stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(index))) ?? ""
     }
 
-    func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil) throws {
+    struct SendResult {
+        let txHashes: [String]
+        let txKeys: [String]
+        let recipientAddress: String
+    }
+
+    func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil) throws -> SendResult {
         guard let walletPtr = walletPointer else {
             throw MoneroCoreError.walletNotInitialized
         }
@@ -396,21 +414,28 @@ class MoneroCore {
             throw MoneroCoreError.match(error) ?? MoneroCoreError.transactionSendFailed(error)
         }
 
-        if let memo {
-            let txIds = String(cString: MONERO_PendingTransaction_txid(pendingTxPtr, "|"))
-            let txId = txIds.split(separator: "|").first ?? ""
-            let cTxId = (txId as NSString).utf8String
-            let cNote = (memo as NSString).utf8String
-
-            MONERO_Wallet_setUserNote(walletPtr, cTxId, cNote)
+        guard let txIds = stringFromCString(MONERO_PendingTransaction_txid(txPtr, "|")), !txIds.isEmpty else {
+            throw MoneroCoreError.transactionSendFailed("Failed to get transaction ID from pending transaction")
         }
+        let txKeys = stringFromCString(MONERO_PendingTransaction_txKey(txPtr, "|")) ?? ""
 
         guard MONERO_PendingTransaction_commit(txPtr, "", false) else {
             let error = stringFromCString(MONERO_PendingTransaction_errorString(txPtr)) ?? "Unknown commit error"
             throw MoneroCoreError.transactionCommitFailed(error)
         }
 
+        let txIdArray = txIds.split(separator: "|").map { String($0) }
+        let txKeyArray = txKeys.split(separator: "|").map { String($0) }
+
+        for txId in txIdArray {
+            if let memo {
+                let cTxId = (txId as NSString).utf8String
+                MONERO_Wallet_setUserNote(walletPtr, cTxId, memo)
+            }
+        }
+
         startStateManager()
+        return SendResult(txHashes: txIdArray, txKeys: txKeyArray, recipientAddress: address)
     }
 
     func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
@@ -446,7 +471,6 @@ class MoneroCore {
         let hash: String
         let timestamp: Date
         let note: String?
-        var transfers: [Transfer]
     }
 
     struct SubAddress {

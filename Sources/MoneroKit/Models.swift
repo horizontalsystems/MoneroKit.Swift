@@ -1,10 +1,5 @@
 import Foundation
 
-public struct Transfer {
-    public let address: String
-    public let amount: UInt64
-}
-
 public enum TransactionFilterType {
     case incoming, outgoing
 
@@ -27,9 +22,10 @@ public struct TransactionInfo {
     public let isFailed: Bool
     public let timestamp: Int
     public let memo: String?
+    public let txKey: String?
     public let recipientAddress: String?
 
-    init(transaction: Transaction) {
+    init(transaction: Transaction, privateTxData: PrivateTxData? = nil) {
         uid = transaction.uid
         hash = transaction.hash
         type = transaction.type
@@ -40,7 +36,8 @@ public struct TransactionInfo {
         isFailed = transaction.isFailed
         timestamp = transaction.timestamp
         memo = transaction.note
-        recipientAddress = transaction.recipientAddress
+        txKey = privateTxData?.txKey
+        recipientAddress = transaction.recipientAddress ?? privateTxData?.recipientAddress
     }
 }
 

@@ -35,5 +35,5 @@ class App_WalletState: ObservableObject, MoneroKitDelegate {
         }
     }
 
-    func subAddressesUpdated(subaddresses: [SubAddress]) {}
+    func subAddressesUpdated(subaddresses _: [SubAddress]) {}
 }

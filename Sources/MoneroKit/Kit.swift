@@ -114,7 +114,7 @@ public class Kit {
 
         return storage
             .transactions(fromTimestamp: resolvedTimestamp, descending: descending, type: type, limit: limit)
-            .map { TransactionInfo(transaction: $0) }
+            .map { TransactionInfo(transaction: $0, privateTxData: storage.getPrivateTxData(byHash: $0.hash)) }
     }
 
     // Methods interacting with moneroCore
@@ -166,12 +166,12 @@ public class Kit {
     public func refresh() {
         lifecycleQueue.async { [weak self] in
             guard let self,
-                  self.started,
+                  started,
                   KitManager.shared.isRunning(kitId: self.kitId) else { return }
 
-            switch self.moneroCore.state {
-            case .connecting, .syncing, .synced: self.moneroCore.refresh()
-            case .notSynced: self.restart()
+            switch moneroCore.state {
+            case .connecting, .syncing, .synced: moneroCore.refresh()
+            case .notSynced: restart()
             case .idle: ()
             }
         }
@@ -182,7 +182,14 @@ public class Kit {
     }
 
     public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws {
-        try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo)
+        let result = try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo)
+
+        for (index, txHash) in result.txHashes.enumerated() {
+            if index < result.txKeys.count {
+                let privateTxData = PrivateTxData(txHash: txHash, txKey: result.txKeys[index], recipientAddress: result.recipientAddress)
+                storage.savePrivateTxData(privateTxData)
+            }
+        }
     }
 
     public func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
@@ -204,7 +211,7 @@ extension Kit: MoneroCoreDelegate {
     }
 
     func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress]) {
-        if moneroCore.account == 0 && subAddresses.count <= 1 {
+        if moneroCore.account == 0, subAddresses.count <= 1 {
             // 0 account must keep 2 addresses created on Kit initialization
             return
         } else if subAddresses.count == 0 {
@@ -251,7 +258,7 @@ extension Kit: MoneroCoreDelegate {
 
         storage.update(transactions: transactionRecords)
 
-        let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0) }
+        let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0, privateTxData: storage.getPrivateTxData(byHash: $0.hash)) }
         delegate?.transactionsUpdated(inserted: [], updated: transactionInfos)
 
         // Mark used addresses

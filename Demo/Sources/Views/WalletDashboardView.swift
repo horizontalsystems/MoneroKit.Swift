@@ -49,11 +49,11 @@ struct WalletDashboardView: View {
 
     private func stateDescription(_ state: WalletState) -> String {
         switch state {
-            case .connecting: return "Connecting..."
-            case .syncing(let progress, let remainingBlocksCount): return "Syncing (\(progress)%, \(remainingBlocksCount) blocks remaining)"
-            case .synced: return "Synced"
-            case .idle(let daemonReachable): return "Idle \(daemonReachable ? "🔹" : "❌")"
-            case .notSynced(let error): return "Not Synced: \(error)"
+        case .connecting: return "Connecting..."
+        case let .syncing(progress, remainingBlocksCount): return "Syncing (\(progress)%, \(remainingBlocksCount) blocks remaining)"
+        case .synced: return "Synced"
+        case let .idle(daemonReachable): return "Idle \(daemonReachable ? "🔹" : "❌")"
+        case let .notSynced(error): return "Not Synced: \(error)"
         }
     }
 }
