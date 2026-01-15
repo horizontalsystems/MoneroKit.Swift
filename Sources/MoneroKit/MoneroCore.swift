@@ -216,7 +216,6 @@ class MoneroCore {
         case .connecting, .notSynced: ()
 
         case .synced:
-            stateManager.stop()
             refresh()
             stateManager.walletStored()
 

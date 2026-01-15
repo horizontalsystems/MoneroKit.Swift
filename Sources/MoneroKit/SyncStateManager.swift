@@ -123,7 +123,7 @@ class SyncStateManager {
     private func scheduleNextCheck() {
         guard isRunning else { return }
 
-        queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.checkSyncState()
         }
     }

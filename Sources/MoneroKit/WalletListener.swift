@@ -13,7 +13,6 @@ class WalletListener {
     private func checkListener() {
         guard let walletListenerPointer else { return }
 
-        MONERO_Wallet_refresh(walletPointer)
         let hasNewTransaction = MONERO_cw_WalletListener_isNewTransactionExist(walletListenerPointer)
         let listenerHeight = MONERO_cw_WalletListener_height(walletListenerPointer)
 
