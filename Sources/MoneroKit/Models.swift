@@ -87,7 +87,7 @@ public enum WalletCoreStatus {
 }
 
 public enum WalletState: Equatable {
-    case synced
+    case synced(lastBlockHeight: UInt64)
     case connecting(waiting: Bool)
     case syncing(progress: Int, remainingBlocksCount: Int)
     case notSynced(error: WalletStateError)
@@ -95,7 +95,7 @@ public enum WalletState: Equatable {
 
     public static func == (lhs: WalletState, rhs: WalletState) -> Bool {
         switch (lhs, rhs) {
-        case (.synced, .synced): return true
+        case let (.synced(lhsHeight), .synced(rhsHeight)): return lhsHeight == rhsHeight
         case let (.connecting(lhsWaiting), .connecting(rhsWaiting)): return lhsWaiting == rhsWaiting
         case let (.syncing(lhsProgress, lhsRemaining), .syncing(rhsProgress, rhsRemaining)): return lhsProgress == rhsProgress && lhsRemaining == rhsRemaining
         case let (.notSynced(lhsError), .notSynced(rhsError)): return lhsError == rhsError

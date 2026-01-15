@@ -320,11 +320,13 @@ class MoneroCore {
         }
 
         if hasUnconfirmedTransactions, biggestConfirmations < Kit.confirmationsThreshold {
+            let height: UInt64
             if stateManager.walletHeight < biggestConfirmations {
-                walletListener.setLockedBalanceHeight(height: stateManager.walletHeight)
+                height = stateManager.walletHeight
             } else {
-                walletListener.setLockedBalanceHeight(height: stateManager.walletHeight - biggestConfirmations)
+                height = stateManager.walletHeight - biggestConfirmations
             }
+            walletListener.setLockedBalanceHeight(height: height)
         }
     }
 

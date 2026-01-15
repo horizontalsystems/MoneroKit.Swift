@@ -1,5 +1,6 @@
 import CMonero
 import Foundation
+import HsToolKit
 
 class WalletListener {
     private var walletListenerPointer: UnsafeMutableRawPointer?
@@ -12,7 +13,10 @@ class WalletListener {
     private func checkListener() {
         guard let walletListenerPointer else { return }
 
+        MONERO_Wallet_refresh(walletPointer)
         let hasNewTransaction = MONERO_cw_WalletListener_isNewTransactionExist(walletListenerPointer)
+        let listenerHeight = MONERO_cw_WalletListener_height(walletListenerPointer)
+
         if hasNewTransaction {
             // Has new transaction
             onNewTransaction?()
@@ -20,9 +24,8 @@ class WalletListener {
         }
 
         if let height = lockedBalanceBlockHeight {
-            let newHeight = MONERO_cw_WalletListener_height(walletListenerPointer)
+            let newHeight = listenerHeight
             if newHeight > height, newHeight - height >= Kit.confirmationsThreshold {
-                // Previously confirmed transaction has enough confirmations for the locked balance to be updated.
                 onNewTransaction?()
                 lockedBalanceBlockHeight = nil
             }

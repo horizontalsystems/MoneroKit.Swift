@@ -72,7 +72,7 @@ class SyncStateManager {
         }
 
         if daemonHeight == walletHeight, isSynchronized {
-            return .synced
+            return .synced(lastBlockHeight: walletHeight)
         }
 
         let numberOfBlocksToSync = Int(daemonHeight - restoreHeight)
@@ -81,14 +81,17 @@ class SyncStateManager {
             return .syncing(progress: 100, remainingBlocksCount: 0)
         }
 
-        blockHeights = (walletHeight, daemonHeight)
-        return .syncing(progress: numberOfBlocksSynced * 100 / numberOfBlocksToSync, remainingBlocksCount: numberOfBlocksToSync - numberOfBlocksSynced)
+        let progress = numberOfBlocksSynced * 100 / numberOfBlocksToSync
+        let remaining = numberOfBlocksToSync - numberOfBlocksSynced
+        return .syncing(progress: progress, remainingBlocksCount: remaining)
     }
 
     private func checkSyncState() {
         guard let walletPtr = walletPointer else { return }
 
+        let previousWalletHeight = walletHeight
         walletHeight = MONERO_Wallet_blockChainHeight(walletPtr)
+
         isSynchronized = MONERO_Wallet_synchronized(walletPtr)
         let status = MONERO_Wallet_status(walletPtr)
 
@@ -105,7 +108,12 @@ class SyncStateManager {
             lastStoredBlockHeight = walletHeight
         }
 
+        let previousDaemonHeight = daemonHeight
         daemonHeight = MONERO_Wallet_daemonBlockChainHeight(walletPtr)
+
+        if previousWalletHeight != walletHeight || previousDaemonHeight != daemonHeight {
+            blockHeights = (walletHeight, daemonHeight)
+        }
 
         state = evaluateState()
 
@@ -136,46 +144,12 @@ class SyncStateManager {
         self.cWalletPassword = cWalletPassword
         connectStartTime = Date()
 
-//        if !backgroundSyncSetupSuccess {
-//            backgroundSyncSetupSuccess = MONERO_Wallet_setupBackgroundSync(walletPointer, BackgroundSyncType.customPassword.rawValue, cWalletPassword, "")
-//
-//            if !backgroundSyncSetupSuccess {
-//                let errorCStr = MONERO_Wallet_errorString(walletPointer)
-//                let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
-//                logger?.error("Error setup Background sync: \(msg)")
-//                return
-//            }
-//        }
-//
-//        let startedBackgroundSync = MONERO_Wallet_startBackgroundSync(walletPointer)
-//        if !startedBackgroundSync {
-//            let errorCStr = MONERO_Wallet_errorString(walletPointer)
-//            let msg = stringFromCString(errorCStr) ?? "Start background sync error"
-//            logger?.error("Error start Background sync: \(msg)")
-//            return
-//        }
-
         scheduleNextCheck()
     }
 
     func stop() {
         isRunning = false
-
-//        if let walletPtr = walletPointer {
-//            let stopped = MONERO_Wallet_stopBackgroundSync(walletPtr, cWalletPassword)
-//            if !stopped {
-//                let errorCStr = MONERO_Wallet_errorString(walletPtr)
-//                let msg = stringFromCString(errorCStr) ?? "Setup background sync error"
-//                logger?.error("Error stop Background sync: \(msg)")
-//                return
-//            }
-//        }
         connectStartTime = nil
-
-        if let walletPointer {
-            MONERO_Wallet_pauseRefresh(walletPointer)
-        }
-
         walletPointer = nil
         cWalletPassword = nil
     }
