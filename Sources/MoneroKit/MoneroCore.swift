@@ -7,6 +7,7 @@ class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
 
     private let globalEventQueue = DispatchQueue.global(qos: .background)
+    private let walletQueue = DispatchQueue(label: "io.horizontalsystems.monero_kit.wallet_queue", qos: .background)
 
     private var wallet: MoneroWallet
     private var stateManager: SyncStateManager
@@ -339,10 +340,14 @@ class MoneroCore {
     }
 
     private func stopCore() {
-        guard let wmp = walletManagerPointer, let wp = walletPointer else { return }
+        let wp: UnsafeMutableRawPointer? = walletQueue.sync {
+            let wp = walletPointer
+            walletPointer = nil
+            return wp
+        }
 
+        guard let wmp = walletManagerPointer, let wp else { return }
         MONERO_WalletManager_closeWallet(wmp, wp, false)
-        walletPointer = nil
     }
 
     private func startWalletServices() {
@@ -374,11 +379,13 @@ class MoneroCore {
     }
 
     func refresh() {
-        guard let walletPtr = walletPointer else { return }
-        updateBalance(walletPointer: walletPtr)
-        fetchSubaddresses(walletPointer: walletPtr)
-        fetchTransactions(walletPointer: walletPtr)
-        storeWallet(walletPointer: walletPtr)
+        walletQueue.async { [weak self] in
+            guard let self, let walletPtr = walletPointer else { return }
+            updateBalance(walletPointer: walletPtr)
+            fetchSubaddresses(walletPointer: walletPtr)
+            fetchTransactions(walletPointer: walletPtr)
+            storeWallet(walletPointer: walletPtr)
+        }
     }
 
     func setConnectingState(waiting: Bool) {
