@@ -150,6 +150,61 @@ public class RestoreHeight {
         (try? getHeightOrEstimate(date: date)) ?? 0
     }
 
+    public static func getDate(height: Int64) -> Date {
+        let utcTimeZone = TimeZone(identifier: "UTC")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utcTimeZone
+
+        let formatter = DateFormatter()
+        formatter.timeZone = utcTimeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        // First Monero block date: April 18, 2014
+        let firstBlockDate = formatter.date(from: "2014-04-18")!
+
+        // If height is before our earliest entry, return first block date
+        guard height >= 18844 else {
+            return firstBlockDate
+        }
+
+        // Sort entries by height to find the bracketing pair
+        let sortedEntries = blockHeights.sorted { $0.value < $1.value }
+
+        // Find the two entries that bracket this height
+        var prevEntry: (key: String, value: Int64)?
+        var nextEntry: (key: String, value: Int64)?
+
+        for (index, entry) in sortedEntries.enumerated() {
+            if entry.value <= height {
+                prevEntry = entry
+                if index + 1 < sortedEntries.count {
+                    nextEntry = sortedEntries[index + 1]
+                }
+            } else {
+                break
+            }
+        }
+
+        guard let prev = prevEntry, let prevDate = formatter.date(from: prev.key) else {
+            return firstBlockDate
+        }
+
+        if let next = nextEntry, let nextDate = formatter.date(from: next.key) {
+            // Interpolate between the two dates
+            let heightDiff = next.value - prev.value
+            let heightOffset = height - prev.value
+            let timeDiff = nextDate.timeIntervalSince(prevDate)
+            let timeOffset = timeDiff * Double(heightOffset) / Double(heightDiff)
+            return prevDate.addingTimeInterval(timeOffset)
+        } else {
+            // Height is beyond our last entry, estimate using block time
+            let heightOffset = height - prev.value
+            let dailyBlocks = Double(24 * 60 * 60) / Double(DIFFICULTY_TARGET)
+            let daysOffset = Double(heightOffset) / dailyBlocks
+            return prevDate.addingTimeInterval(daysOffset * 24 * 60 * 60)
+        }
+    }
+
     public static func maximumEstimatedHeight() -> Int64 {
         // getHeight estimates for now - 2 days, so we assume estimation for now + 2 days is accurate enough
         getHeight(date: Date() + TimeInterval(86400 * 4))
