@@ -8,6 +8,7 @@ public class Kit {
     private let storage: GrdbStorage
     private let kitId = UUID().uuidString
     private let lifecycleQueue = DispatchQueue(label: "io.horizontalsystems.monero_kit.kit_lifecycle_queue", qos: .background)
+    private let walletDirectoryName: String
     private var started = false
 
     public weak var delegate: MoneroKitDelegate?
@@ -19,7 +20,7 @@ public class Kit {
         let databasePath = baseDirectoryUrl.appendingPathComponent("storage").path
         storage = GrdbStorage(databaseFilePath: databasePath)
 
-        let walletDirectoryName = "\(baseDirectoryName)/monero_core"
+        walletDirectoryName = "\(baseDirectoryName)/monero_core"
         if storage.getBlockHeights() == nil {
             try FileHandler.remove(for: walletDirectoryName)
         }
@@ -133,7 +134,20 @@ public class Kit {
 
         if kitState == .running {
             moneroCore.setConnectingState(waiting: false)
-            moneroCore.start()
+            do {
+                try moneroCore.start()
+            } catch {
+                if let coreError = error as? MoneroCoreError, case .restoreHeightDontMatch = coreError {
+                    do {
+                        try FileHandler.remove(for: walletDirectoryName)
+                        _ = try FileHandler.directoryURL(for: walletDirectoryName).appendingPathComponent("wallet").path
+                        storage.clearStorage()
+                        try moneroCore.start()
+                    } catch {
+                        print(error)
+                    }
+                }
+            }
         }
     }
 

@@ -89,6 +89,16 @@ class GrdbStorage {
         return migrator
     }
 
+    func clearStorage() {
+        try! dbPool.write { db in
+            try Transaction.deleteAll(db)
+            try Balance.deleteAll(db)
+            try BlockHeights.deleteAll(db)
+            try SubAddress.deleteAll(db)
+            try PrivateTxData.deleteAll(db)
+        }
+    }
+
     func transaction(byHash: String) -> Transaction? {
         try! dbPool.read { db in
             try Transaction.filter(Transaction.Columns.hash == byHash).fetchOne(db)

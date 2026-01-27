@@ -109,6 +109,12 @@ class MoneroCore {
 
         if walletExists {
             recoveredWalletPtr = MONERO_WalletManager_openWallet(walletManagerPointer, cWalletPath, cWalletPassword, networkType.rawValue)
+            let currentRestoreHeight = MONERO_Wallet_getRefreshFromBlockHeight(recoveredWalletPtr!)
+
+            if currentRestoreHeight != restoreHeight {
+                MONERO_WalletManager_closeWallet(walletManagerPointer, recoveredWalletPtr, false)
+                throw MoneroCoreError.restoreHeightDontMatch
+            }
         } else {
             switch wallet {
             case let .bip39(mnemonic, passphrase):
@@ -330,12 +336,16 @@ class MoneroCore {
         }
     }
 
-    private func startCore() {
+    private func startCore() throws {
         guard walletPointer == nil else { return }
         do {
             try openWallet()
         } catch {
-            stateManager.state = .notSynced(error: .startError(error.localizedDescription))
+            if let coreError = error as? MoneroCoreError, case .restoreHeightDontMatch = coreError {
+                throw error
+            } else {
+                stateManager.state = .notSynced(error: .startError(error.localizedDescription))
+            }
         }
     }
 
@@ -362,14 +372,14 @@ class MoneroCore {
         walletListener.stop()
     }
 
-    func start() {
+    func start() throws {
         guard walletManagerPointer != nil else {
             logger?.error("Error: Could not get WalletManager instance.")
             return
         }
 
         stateManager.validateReachable()
-        startCore()
+        try startCore()
         startWalletServices()
     }
 
