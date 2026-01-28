@@ -141,8 +141,10 @@ public class Kit {
                     do {
                         try FileHandler.remove(for: walletDirectoryName)
                         _ = try FileHandler.directoryURL(for: walletDirectoryName).appendingPathComponent("wallet").path
+
                         storage.clearStorage()
                         try moneroCore.start()
+                        delegate?.balanceDidChange(balanceInfo: balanceInfo)
                     } catch {
                         print(error)
                     }

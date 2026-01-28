@@ -147,7 +147,9 @@ public class RestoreHeight {
     ]
 
     public static func getHeight(date: Date) -> Int64 {
-        (try? getHeightOrEstimate(date: date)) ?? 0
+        // Cap at current date to avoid returning heights for future dates
+        let cappedDate = min(date, Date())
+        return (try? getHeightOrEstimate(date: cappedDate)) ?? 0
     }
 
     public static func getDate(height: Int64) -> Date {
@@ -179,6 +181,8 @@ public class RestoreHeight {
                 prevEntry = entry
                 if index + 1 < sortedEntries.count {
                     nextEntry = sortedEntries[index + 1]
+                } else {
+                    nextEntry = nil
                 }
             } else {
                 break
@@ -189,20 +193,29 @@ public class RestoreHeight {
             return firstBlockDate
         }
 
+        let estimatedDate: Date
         if let next = nextEntry, let nextDate = formatter.date(from: next.key) {
             // Interpolate between the two dates
             let heightDiff = next.value - prev.value
             let heightOffset = height - prev.value
             let timeDiff = nextDate.timeIntervalSince(prevDate)
-            let timeOffset = timeDiff * Double(heightOffset) / Double(heightDiff)
-            return prevDate.addingTimeInterval(timeOffset)
+            // Guard against division by zero
+            if heightDiff > 0 {
+                let timeOffset = timeDiff * Double(heightOffset) / Double(heightDiff)
+                estimatedDate = prevDate.addingTimeInterval(timeOffset)
+            } else {
+                estimatedDate = prevDate
+            }
         } else {
             // Height is beyond our last entry, estimate using block time
             let heightOffset = height - prev.value
             let dailyBlocks = Double(24 * 60 * 60) / Double(DIFFICULTY_TARGET)
             let daysOffset = Double(heightOffset) / dailyBlocks
-            return prevDate.addingTimeInterval(daysOffset * 24 * 60 * 60)
+            estimatedDate = prevDate.addingTimeInterval(daysOffset * 24 * 60 * 60)
         }
+
+        // Cap at current date to avoid returning future dates
+        return min(estimatedDate, Date())
     }
 
     public static func maximumEstimatedHeight() -> Int64 {
