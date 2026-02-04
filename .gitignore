@@ -32,3 +32,5 @@ GeneratedMocks.swift
 Package.resolved
 .swiftpm
 .build/
+
+CLAUDE.md

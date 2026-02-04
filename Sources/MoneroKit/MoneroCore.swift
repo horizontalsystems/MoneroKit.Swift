@@ -357,7 +357,7 @@ class MoneroCore {
         }
 
         guard let wmp = walletManagerPointer, let wp else { return }
-        MONERO_WalletManager_closeWallet(wmp, wp, false)
+        MONERO_WalletManager_closeWallet(wmp, wp, true)
     }
 
     private func startWalletServices() {
