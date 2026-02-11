@@ -1,5 +1,7 @@
+import Combine
 import Foundation
 import HsToolKit
+import UIKit
 
 public class Kit {
     public static let confirmationsThreshold: UInt64 = 10
@@ -10,6 +12,8 @@ public class Kit {
     private let lifecycleQueue = DispatchQueue(label: "io.horizontalsystems.monero_kit.kit_lifecycle_queue", qos: .background)
     private let walletDirectoryName: String
     private var started = false
+    private var cancellables = Set<AnyCancellable>()
+    private var handledForegroundFromExpiredBackground = false
 
     public weak var delegate: MoneroKitDelegate?
 
@@ -54,6 +58,53 @@ public class Kit {
 
                 let firstSubAddress = try MoneroCore.address(wallet: wallet, account: account, index: 1, networkType: networkType)
                 storage.add(subAddress: SubAddress(address: firstSubAddress, index: 1))
+            }
+        }
+
+        subscribeToBackgroundNotifications()
+    }
+
+    private func subscribeToBackgroundNotifications() {
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in
+                self?.handleDidEnterBackground()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                self?.handleDidBecomeActive()
+            }
+            .store(in: &cancellables)
+
+        BackgroundModeObserver.shared.foregroundFromExpiredBackgroundPublisher
+            .sink { [weak self] in
+                self?.handleForegroundFromExpiredBackground()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleDidEnterBackground() {
+        lifecycleQueue.async { [weak self] in
+            guard let self, started else { return }
+            handledForegroundFromExpiredBackground = false
+            moneroCore.pause()
+        }
+    }
+
+    private func handleForegroundFromExpiredBackground() {
+        lifecycleQueue.async { [weak self] in
+            guard let self, started else { return }
+            handledForegroundFromExpiredBackground = true
+            _restart()
+        }
+    }
+
+    private func handleDidBecomeActive() {
+        lifecycleQueue.async { [weak self] in
+            guard let self, started else { return }
+            if !handledForegroundFromExpiredBackground {
+                moneroCore.resume()
             }
         }
     }
@@ -216,10 +267,6 @@ public class Kit {
 extension Kit: MoneroCoreDelegate {
     func walletStateDidChange(state: WalletState) {
         delegate?.walletStateDidChange(state: state)
-
-        if case .notSynced = state {
-            stop()
-        }
 
         if let (walletHeight, daemonHeight) = moneroCore.blockHeights {
             storage.update(blockHeights: BlockHeights(daemonHeight: Int(daemonHeight), walletHeight: Int(walletHeight)))

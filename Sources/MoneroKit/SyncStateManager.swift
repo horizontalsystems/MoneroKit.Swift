@@ -101,6 +101,8 @@ class SyncStateManager {
             logger?.error("Wallet is in error state (\(status)): \(errorStr ?? "Unknown wallet error").")
             state = .notSynced(error: WalletStateError.statusError(errorStr))
 
+            // Continue polling - the wallet may recover
+            scheduleNextCheck()
             return
         }
 

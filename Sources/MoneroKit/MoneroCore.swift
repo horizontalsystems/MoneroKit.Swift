@@ -388,6 +388,23 @@ class MoneroCore {
         stopCore()
     }
 
+    func pause() {
+        stopWalletServices()
+
+        walletQueue.sync { [weak self] in
+            guard let self, let walletPtr = walletPointer else { return }
+            MONERO_Wallet_pauseRefresh(walletPtr)
+            storeWallet(walletPointer: walletPtr)
+        }
+    }
+
+    func resume() {
+        guard let walletPtr = walletPointer else { return }
+
+        MONERO_Wallet_startRefresh(walletPtr)
+        startWalletServices()
+    }
+
     func refresh() {
         walletQueue.async { [weak self] in
             guard let self, let walletPtr = walletPointer else { return }
