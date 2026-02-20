@@ -11,6 +11,10 @@ let package = Package(
             name: "MoneroKit",
             targets: ["MoneroKit"]
         ),
+        .library(
+            name: "ZanoKit",
+            targets: ["ZanoKit"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", .upToNextMajor(from: "6.0.0")),
@@ -29,7 +33,29 @@ let package = Package(
 
         ),
         .target(
+            name: "ZanoKit",
+            dependencies: [
+                "CZano",
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "HdWalletKit", package: "HdWalletKit.Swift"),
+                .product(name: "HsToolKit", package: "HsToolKit.Swift"),
+            ]
+
+        ),
+        .target(
             name: "CMonero",
+            dependencies: ["MoneroBinary"],
+            publicHeadersPath: "include",
+            cxxSettings: [
+                .headerSearchPath("."),
+                .define("BOOST_ERROR_CODE_HEADER_ONLY"),
+            ],
+            linkerSettings: [
+                .linkedLibrary("c++"),
+            ]
+        ),
+        .target(
+            name: "CZano",
             dependencies: ["MoneroBinary"],
             publicHeadersPath: "include",
             cxxSettings: [
@@ -42,7 +68,7 @@ let package = Package(
         ),
         .binaryTarget(
             name: "MoneroBinary",
-            path: "Monero.xcframework"
+            path: "MoneroZano.xcframework"
         ),
     ],
     cxxLanguageStandard: .cxx11

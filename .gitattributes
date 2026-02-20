@@ -1,0 +1,2 @@
+MoneroZano.xcframework/ios-arm64-simulator/libMoneroZanoCombined.a filter=lfs diff=lfs merge=lfs -text
+MoneroZano.xcframework/ios-arm64/libMoneroZanoCombined.a filter=lfs diff=lfs merge=lfs -text

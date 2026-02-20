@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		D03743232E290487003E41A6 /* MoneroKit in Frameworks */ = {isa = PBXBuildFile; productRef = D03743222E290487003E41A6 /* MoneroKit */; };
+		D059BDEA2F42DF1A00FE82EC /* ZanoKit in Frameworks */ = {isa = PBXBuildFile; productRef = D059BDE92F42DF1A00FE82EC /* ZanoKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D03743232E290487003E41A6 /* MoneroKit in Frameworks */,
+				D059BDEA2F42DF1A00FE82EC /* ZanoKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,6 +81,7 @@
 			name = Demo;
 			packageProductDependencies = (
 				D03743222E290487003E41A6 /* MoneroKit */,
+				D059BDE92F42DF1A00FE82EC /* ZanoKit */,
 			);
 			productName = Demo;
 			productReference = D03742DB2E2902A8003E41A6 /* Demo.app */;
@@ -353,6 +356,10 @@
 		D03743222E290487003E41A6 /* MoneroKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MoneroKit;
+		};
+		D059BDE92F42DF1A00FE82EC /* ZanoKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ZanoKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

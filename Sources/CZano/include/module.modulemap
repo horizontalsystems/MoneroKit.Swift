@@ -1,0 +1,4 @@
+module CZano {
+    header "../wallet2_api_c.h"
+    export *
+}

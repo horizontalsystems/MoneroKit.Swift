@@ -3,14 +3,15 @@ import SwiftUI
 
 struct WalletDashboardView: View {
     @Binding var moneroKit: Kit?
-    @ObservedObject var walletState: App_WalletState
+    @ObservedObject var walletState: MoneroWalletState
 
     var body: some View {
         List {
             Section(header: Text("Wallet Status")) {
                 Text("State: \(stateDescription(walletState.walletState))")
                 Text("Wallet Height: \(moneroKit?.lastBlockInfo ?? 0)")
-                Text("Balance: \(Double(walletState.balance.unlocked) / 1_000_000_000_000) XMR")
+                Text("Balance (all): \(Double(walletState.balance.all) / 1_000_000_000_000) XMR")
+                Text("Balance (unlocked): \(Double(walletState.balance.unlocked) / 1_000_000_000_000) XMR")
             }
 
             Section(header: Text("Actions")) {
