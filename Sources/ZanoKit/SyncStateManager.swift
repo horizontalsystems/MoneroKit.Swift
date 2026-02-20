@@ -25,6 +25,7 @@ class SyncStateManager {
     private(set) var isInLongRefresh: Bool = false
 
     var onSyncStateChanged: (() -> Void)?
+    var onSyncedPoll: (() -> Void)?
 
     var state: WalletState = .notSynced(error: WalletStateError.notStarted) {
         didSet {
@@ -129,6 +130,11 @@ class SyncStateManager {
         let newState = evaluateState()
         logger?.debug("Sync: wallet=\(walletHeight), daemon=\(daemonHeight), longRefresh=\(isInLongRefresh) -> \(newState.description)")
         state = newState
+
+        // Call onSyncedPoll every poll cycle when synced (for transaction detection)
+        if case .synced = newState {
+            onSyncedPoll?()
+        }
 
         scheduleNextCheck()
     }

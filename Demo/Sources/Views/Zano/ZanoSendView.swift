@@ -3,6 +3,8 @@ import SwiftUI
 
 struct ZanoSendView: View {
     @Binding var zanoKit: Kit?
+    @ObservedObject var walletState: Zano_WalletState
+    @State private var selectedAssetId: String = ZanoAssetId
     @State private var recipientAddress: String = ""
     @State private var amount: String = ""
     @State private var memo: String = ""
@@ -10,22 +12,57 @@ struct ZanoSendView: View {
     @State private var transactionStatus: String = ""
     @State private var isLoading: Bool = false
 
-    private let decimals: Double = 1_000_000_000_000 // 12 decimals for ZANO
+    private var selectedAsset: AssetInfo? {
+        walletState.assets.first { $0.assetId == selectedAssetId }
+    }
+
+    private var selectedBalance: BalanceInfo? {
+        walletState.balances.first { $0.assetId == selectedAssetId }
+    }
+
+    private var decimals: Double {
+        pow(10.0, Double(selectedAsset?.decimalPoint ?? 12))
+    }
+
+    private var ticker: String {
+        selectedAsset?.ticker ?? "ZANO"
+    }
 
     var body: some View {
         Form {
-            Section(header: Text("Send Zano")) {
+            Section(header: Text("Asset")) {
+                Picker("Select Asset", selection: $selectedAssetId) {
+                    ForEach(walletState.assets, id: \.assetId) { asset in
+                        let balance = walletState.balances.first { $0.assetId == asset.assetId }
+                        let unlocked = balance?.unlocked ?? 0
+                        let formattedBalance = formatAmount(unlocked, decimals: asset.decimalPoint)
+                        Text("\(asset.ticker) (\(formattedBalance))")
+                            .tag(asset.assetId)
+                    }
+                }
+
+                if let balance = selectedBalance {
+                    HStack {
+                        Text("Available:")
+                        Spacer()
+                        Text("\(formatAmount(balance.unlocked, decimals: selectedAsset?.decimalPoint ?? 12)) \(ticker)")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section(header: Text("Send \(ticker)")) {
                 TextField("Recipient Address", text: $recipientAddress)
                     .autocapitalization(.none)
                     .autocorrectionDisabled()
-                TextField("Amount (ZANO)", text: $amount)
+                TextField("Amount (\(ticker))", text: $amount)
                     .keyboardType(.decimalPad)
                 TextField("Comment (Optional)", text: $memo)
             }
 
             Section(header: Text("Fee")) {
                 if let fee = estimatedFee {
-                    Text("Network Fee: \(String(format: "%.6f", Double(fee) / decimals)) ZANO")
+                    Text("Network Fee: \(formatAmount(Int64(fee), decimals: 12)) ZANO")
                 } else {
                     Text("Network Fee: --")
                         .foregroundColor(.secondary)
@@ -64,6 +101,12 @@ struct ZanoSendView: View {
         }
     }
 
+    private func formatAmount(_ amount: Int64, decimals: Int) -> String {
+        let divisor = pow(10.0, Double(decimals))
+        let value = Double(amount) / divisor
+        return String(format: "%.\(min(decimals, 6))f", value)
+    }
+
     private func sendTransaction() {
         guard let amountDouble = Double(amount) else {
             transactionStatus = "Error: Invalid amount"
@@ -80,6 +123,7 @@ struct ZanoSendView: View {
             do {
                 let txHash = try zanoKit?.send(
                     to: recipientAddress,
+                    assetId: selectedAssetId,
                     amount: .value(amountAtomic),
                     priority: .default,
                     memo: memo.isEmpty ? nil : memo

@@ -6,9 +6,9 @@ struct ZanoContentView: View {
     @Binding var zanoKit: ZanoKit.Kit?
     @ObservedObject var walletState: Zano_WalletState
 
-    @State private var mnemonicSeed: String = ""
+    @State private var mnemonicSeed: String = "frost pupil then system satoshi receive inhale basic retreat voice rapid misery"
     @State private var passphrase: String = ""
-    @State private var walletId: String = ""
+    @State private var walletId: String = "Zano1"
     @State private var daemonAddress: String = "http://37.27.100.59:10500"
     @State private var mnemonicType: String = "BIP39"
     @State private var creationTimestamp: String = "1771398900"

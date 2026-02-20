@@ -4,7 +4,8 @@ import ZanoKit
 
 @MainActor
 class Zano_WalletState: ObservableObject, ZanoKitDelegate {
-    @Published var balance: BalanceInfo = .init(all: 0, unlocked: 0)
+    @Published var assets: [AssetInfo] = []
+    @Published var balances: [BalanceInfo] = []
     @Published var transactions: [TransactionInfo] = []
     @Published var walletState: WalletState = .notSynced(error: .notStarted)
 
@@ -17,16 +18,25 @@ class Zano_WalletState: ObservableObject, ZanoKitDelegate {
         return false
     }
 
-    nonisolated func balanceDidChange(balanceInfo: BalanceInfo) {
+    var nativeBalance: BalanceInfo {
+        balances.first { $0.isNative } ?? BalanceInfo(assetId: ZanoAssetId, total: 0, unlocked: 0)
+    }
+
+    nonisolated func assetsDidChange(assets: [AssetInfo]) {
         Task { @MainActor in
-            self.balance = balanceInfo
+            self.assets = assets
         }
     }
 
-    nonisolated func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo]) {
-        let allTransactions = inserted + updated
+    nonisolated func balancesDidChange(balances: [BalanceInfo]) {
         Task { @MainActor in
-            self.transactions = allTransactions
+            self.balances = balances
+        }
+    }
+
+    nonisolated func transactionsDidChange(transactions: [TransactionInfo]) {
+        Task { @MainActor in
+            self.transactions = transactions
         }
     }
 

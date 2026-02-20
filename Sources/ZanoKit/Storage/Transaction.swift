@@ -12,6 +12,7 @@ public enum TransactionType: Int, DatabaseValueConvertible, Codable {
 class Transaction: Record {
     var uid: String
     var hash: String
+    var assetId: String
     var type: TransactionType
     var blockHeight: UInt64
     var amount: Int64
@@ -22,9 +23,11 @@ class Transaction: Record {
     var note: String?
     var recipientAddress: String?
 
-    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, note: String?, recipientAddress: String?) {
-        uid = UUID().uuidString
+    init(hash: String, assetId: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, note: String?, recipientAddress: String?) {
+        // UID is derived from hash + assetId for consistency
+        uid = "\(hash)_\(assetId)"
         self.hash = hash
+        self.assetId = assetId
         self.type = type
         self.blockHeight = blockHeight
         self.amount = amount
@@ -38,10 +41,6 @@ class Transaction: Record {
         super.init()
     }
 
-    convenience init(timestamp: Int? = nil) {
-        self.init(hash: "", type: .outgoing, blockHeight: 0, amount: 0, fee: 0, isPending: true, isFailed: false, timestamp: timestamp ?? Int(Date().timeIntervalSince1970), note: nil, recipientAddress: nil)
-    }
-
     override open class var databaseTableName: String {
         "transactions"
     }
@@ -49,6 +48,7 @@ class Transaction: Record {
     enum Columns: String, ColumnExpression, CaseIterable {
         case uid
         case hash
+        case assetId
         case type
         case blockHeight
         case amount
@@ -63,6 +63,7 @@ class Transaction: Record {
     required init(row: Row) throws {
         uid = row[Columns.uid]
         hash = row[Columns.hash]
+        assetId = row[Columns.assetId]
         type = row[Columns.type]
         blockHeight = row[Columns.blockHeight]
         amount = row[Columns.amount]
@@ -79,6 +80,7 @@ class Transaction: Record {
     override open func encode(to container: inout PersistenceContainer) throws {
         container[Columns.uid] = uid
         container[Columns.hash] = hash
+        container[Columns.assetId] = assetId
         container[Columns.type] = type
         container[Columns.blockHeight] = blockHeight
         container[Columns.amount] = amount

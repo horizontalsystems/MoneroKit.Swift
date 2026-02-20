@@ -58,13 +58,6 @@ public class Kit {
         zanoCore.state
     }
 
-    public var balanceInfo: BalanceInfo {
-        if let balance = storage.getBalance() {
-            return BalanceInfo(balance: balance)
-        }
-        return BalanceInfo(all: 0, unlocked: 0)
-    }
-
     public var receiveAddress: String {
         zanoCore.walletAddress
     }
@@ -80,13 +73,39 @@ public class Kit {
         return info
     }
 
-    public func transactions(fromHash: String? = nil, descending: Bool = true, type: TransactionFilterType? = nil, limit: Int? = nil) -> [TransactionInfo] {
+    // MARK: - Assets
+
+    public var assets: [AssetInfo] {
+        storage.getAllAssets().map { AssetInfo(asset: $0) }
+    }
+
+    public func asset(byId assetId: String) -> AssetInfo? {
+        storage.getAsset(byId: assetId).map { AssetInfo(asset: $0) }
+    }
+
+    // MARK: - Balances
+
+    public var balances: [BalanceInfo] {
+        storage.getAllBalances().map { BalanceInfo(balance: $0) }
+    }
+
+    public func balance(forAssetId assetId: String) -> BalanceInfo? {
+        storage.getBalance(forAssetId: assetId).map { BalanceInfo(balance: $0) }
+    }
+
+    public var nativeBalance: BalanceInfo {
+        balance(forAssetId: ZanoAssetId) ?? BalanceInfo(assetId: ZanoAssetId, total: 0, unlocked: 0)
+    }
+
+    // MARK: - Transactions
+
+    public func transactions(assetId: String? = nil, fromHash: String? = nil, descending: Bool = true, type: TransactionFilterType? = nil, limit: Int? = nil) -> [TransactionInfo] {
         var fromTimestamp: Int? = nil
         if let fromHash {
             fromTimestamp = storage.transaction(byHash: fromHash)?.timestamp
         }
 
-        return storage.transactions(fromTimestamp: fromTimestamp, descending: descending, type: type, limit: limit)
+        return storage.transactions(assetId: assetId, fromTimestamp: fromTimestamp, descending: descending, type: type, limit: limit)
             .map { TransactionInfo(transaction: $0) }
     }
 
@@ -139,7 +158,7 @@ public class Kit {
     // MARK: - Sending
 
     @discardableResult
-    public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws -> String {
+    public func send(to address: String, assetId: String = ZanoAssetId, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws -> String {
         let fee = estimateFee(priority: priority)
         let amountValue: UInt64
 
@@ -147,15 +166,26 @@ public class Kit {
         case .value(let value):
             amountValue = UInt64(value)
         case .all:
-            // For send all, use unlocked balance minus fee
-            let balance = zanoCore.balance
-            if balance.unlocked <= Int64(fee) {
+            // For send all, use unlocked balance
+            guard let balance = zanoCore.getBalance(forAssetId: assetId) else {
                 throw ZanoCoreError.insufficientFunds("0")
             }
-            amountValue = UInt64(balance.unlocked) - fee
+            if assetId == ZanoAssetId {
+                // For native ZANO, subtract fee from balance (fee is paid in ZANO)
+                if balance.unlocked <= Int64(fee) {
+                    throw ZanoCoreError.insufficientFunds("0")
+                }
+                amountValue = UInt64(balance.unlocked) - fee
+            } else {
+                // For other assets, send full balance (fee is paid separately in ZANO)
+                if balance.unlocked <= 0 {
+                    throw ZanoCoreError.insufficientFunds("0")
+                }
+                amountValue = UInt64(balance.unlocked)
+            }
         }
 
-        return try zanoCore.send(to: address, amount: amountValue, fee: fee, comment: memo)
+        return try zanoCore.send(to: address, assetId: assetId, amount: amountValue, fee: fee, comment: memo)
     }
 
     public func estimateFee(priority: SendPriority = .default) -> UInt64 {
@@ -166,16 +196,45 @@ public class Kit {
 // MARK: - ZanoCoreDelegate
 
 extension Kit: ZanoCoreDelegate {
-    func balanceDidChange(balance: ZanoCore.Balance) {
-        let balanceRecord = Balance(all: balance.all, unlocked: balance.unlocked)
-        storage.update(balance: balanceRecord)
-        delegate?.balanceDidChange(balanceInfo: BalanceInfo(balance: balanceRecord))
+    func assetsDidChange(assets: [ZanoCore.Asset]) {
+        let assetRecords = assets.map { asset in
+            Asset(
+                assetId: asset.assetId,
+                ticker: asset.ticker,
+                fullName: asset.fullName,
+                decimalPoint: asset.decimalPoint,
+                totalMaxSupply: asset.totalMaxSupply,
+                currentSupply: asset.currentSupply,
+                metaInfo: asset.metaInfo
+            )
+        }
+        storage.update(assets: assetRecords)
+
+        let assetInfos = assetRecords.map { AssetInfo(asset: $0) }
+        delegate?.assetsDidChange(assets: assetInfos)
+    }
+
+    func balancesDidChange(balances: [ZanoCore.AssetBalance]) {
+        let balanceRecords = balances.map { balance in
+            Balance(
+                assetId: balance.assetId,
+                total: balance.total,
+                unlocked: balance.unlocked,
+                awaitingIn: balance.awaitingIn,
+                awaitingOut: balance.awaitingOut
+            )
+        }
+        storage.update(balances: balanceRecords)
+
+        let balanceInfos = balanceRecords.map { BalanceInfo(balance: $0) }
+        delegate?.balancesDidChange(balances: balanceInfos)
     }
 
     func transactionsDidChange(transactions: [ZanoCore.Transaction]) {
         let transactionRecords = transactions.map { tx in
             Transaction(
                 hash: tx.hash,
+                assetId: tx.assetId,
                 type: tx.type,
                 blockHeight: tx.blockHeight,
                 amount: tx.amount,
@@ -191,7 +250,7 @@ extension Kit: ZanoCoreDelegate {
         storage.update(transactions: transactionRecords)
 
         let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0) }
-        delegate?.transactionsUpdated(inserted: [], updated: transactionInfos)
+        delegate?.transactionsDidChange(transactions: transactionInfos)
     }
 
     func walletStateDidChange(state: WalletState) {
@@ -222,7 +281,8 @@ public enum ZanoKitError: Error {
 // MARK: - Delegate Protocol
 
 public protocol ZanoKitDelegate: AnyObject {
-    func balanceDidChange(balanceInfo: BalanceInfo)
-    func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo])
+    func assetsDidChange(assets: [AssetInfo])
+    func balancesDidChange(balances: [BalanceInfo])
+    func transactionsDidChange(transactions: [TransactionInfo])
     func walletStateDidChange(state: WalletState)
 }

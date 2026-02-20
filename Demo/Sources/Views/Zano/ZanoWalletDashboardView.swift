@@ -10,14 +10,53 @@ struct ZanoWalletDashboardView: View {
             Section(header: Text("Wallet Status")) {
                 Text("State: \(stateDescription(walletState.walletState))")
                 Text("Wallet Height: \(zanoKit?.lastBlockInfo ?? 0)")
-                Text("Balance: \(Double(walletState.balance.unlocked) / 1_000_000_000_000) ZANO")
+            }
+
+            Section(header: Text("Balances")) {
+                if walletState.balances.isEmpty {
+                    Text("No balances yet")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(walletState.balances, id: \.assetId) { balance in
+                        let asset = walletState.assets.first { $0.assetId == balance.assetId }
+                        let ticker = asset?.ticker ?? "Unknown"
+                        let decimals = asset?.decimalPoint ?? 12
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(ticker)
+                                    .font(.headline)
+                                if balance.isNative {
+                                    Text("(Native)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                            HStack {
+                                Text("Total:")
+                                Spacer()
+                                Text(formatAmount(balance.total, decimals: decimals))
+                            }
+                            .font(.subheadline)
+                            HStack {
+                                Text("Unlocked:")
+                                Spacer()
+                                Text(formatAmount(balance.unlocked, decimals: decimals))
+                            }
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
             }
 
             Section(header: Text("Actions")) {
                 NavigationLink(destination: ZanoSubaddressesView(zanoKit: $zanoKit)) {
                     Text("Receive")
                 }
-                NavigationLink(destination: ZanoSendView(zanoKit: $zanoKit)) {
+                NavigationLink(destination: ZanoSendView(zanoKit: $zanoKit, walletState: walletState)) {
                     Text("Send")
                 }
             }
@@ -26,20 +65,39 @@ struct ZanoWalletDashboardView: View {
                 if walletState.transactions.isEmpty {
                     Text("No transactions yet.")
                 } else {
-                    ForEach(walletState.transactions, id: \.hash) { tx in
-                        VStack(alignment: .leading) {
-                            Text("Hash: \(tx.hash)")
-                                .font(.caption)
-                                .lineLimit(1)
-                            Text("Amount: \(Double(tx.amount) / 1_000_000_000_000, specifier: "%.6f") ZANO")
-                            Text("Direction: \(tx.type.zanoDescription)")
-                            if let recipient = tx.recipientAddress {
-                                Text("To: \(recipient)")
+                    ForEach(walletState.transactions, id: \.uid) { tx in
+                        let asset = walletState.assets.first { $0.assetId == tx.assetId }
+                        let ticker = asset?.ticker ?? "ZANO"
+                        let decimals = asset?.decimalPoint ?? 12
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(tx.type.zanoDescription)
                                     .font(.caption)
-                                    .lineLimit(1)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(tx.type == .incoming ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
+                                    .cornerRadius(4)
+                                Spacer()
+                                Text(ticker)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
                             }
-                            Text("Date: \(Date(timeIntervalSince1970: TimeInterval(tx.timestamp)), formatter: zanoItemFormatter)")
+                            Text("\(formatAmount(tx.amount, decimals: decimals)) \(ticker)")
+                                .font(.subheadline)
+                            Text("Hash: \(tx.hash.prefix(16))...")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            if let recipient = tx.recipientAddress {
+                                Text("To: \(recipient.prefix(20))...")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Text(Date(timeIntervalSince1970: TimeInterval(tx.timestamp)), formatter: zanoItemFormatter)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
                         }
+                        .padding(.vertical, 4)
                     }
                 }
             }
@@ -55,6 +113,12 @@ struct ZanoWalletDashboardView: View {
         case let .idle(daemonReachable): return "Idle (daemon \(daemonReachable ? "reachable" : "unreachable"))"
         case let .notSynced(error): return "Not Synced: \(error)"
         }
+    }
+
+    private func formatAmount(_ amount: Int64, decimals: Int) -> String {
+        let divisor = pow(10.0, Double(decimals))
+        let value = Double(amount) / divisor
+        return String(format: "%.\(min(decimals, 6))f", value)
     }
 }
 

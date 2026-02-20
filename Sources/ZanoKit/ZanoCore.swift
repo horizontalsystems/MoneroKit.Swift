@@ -22,22 +22,29 @@ class ZanoCore {
     private(set) var walletId: Int64?
     var node: Node
 
+    private var assets: [Asset] = [] {
+        didSet {
+            globalEventQueue.async { [weak self] in
+                guard let self else { return }
+                delegate?.assetsDidChange(assets: assets)
+            }
+        }
+    }
+
+    private var balances: [AssetBalance] = [] {
+        didSet {
+            globalEventQueue.async { [weak self] in
+                guard let self else { return }
+                delegate?.balancesDidChange(balances: balances)
+            }
+        }
+    }
+
     private var transactions: [Transaction] = [] {
         didSet {
             globalEventQueue.async { [weak self] in
                 guard let self else { return }
                 delegate?.transactionsDidChange(transactions: transactions)
-            }
-        }
-    }
-
-    private(set) var balance: Balance = .init(all: 0, unlocked: 0) {
-        didSet {
-            globalEventQueue.async { [weak self] in
-                guard let self else { return }
-                if oldValue != balance {
-                    delegate?.balanceDidChange(balance: balance)
-                }
             }
         }
     }
@@ -66,6 +73,12 @@ class ZanoCore {
 
         stateManager.onSyncStateChanged = { [weak self] in
             self?.onSyncStateChanged()
+        }
+
+        stateManager.onSyncedPoll = { [weak self] in
+            self?.walletQueue.async {
+                self?.refresh()
+            }
         }
     }
 
@@ -136,9 +149,9 @@ class ZanoCore {
             walletAddress = address
             logger?.debug("Wallet address: \(address)")
 
-            // Parse initial balance
-            if let balances = wi["balances"] as? [[String: Any]] {
-                parseBalances(balances)
+            // Parse initial balances
+            if let balancesArray = wi["balances"] as? [[String: Any]] {
+                parseBalancesResponse(balancesArray)
             }
         }
 
@@ -199,18 +212,53 @@ class ZanoCore {
         )
     }
 
-    private func parseBalances(_ balances: [[String: Any]]) {
-        // Find native ZANO balance
-        for balanceInfo in balances {
-            if let assetInfo = balanceInfo["asset_info"] as? [String: Any],
-               let ticker = assetInfo["ticker"] as? String,
-               ticker == "ZANO" {
-                let total = balanceInfo["total"] as? Int64 ?? 0
-                let unlocked = balanceInfo["unlocked"] as? Int64 ?? 0
-                balance = Balance(all: total, unlocked: unlocked)
-                return
+    private func parseBalancesResponse(_ balancesArray: [[String: Any]]) {
+        var parsedAssets: [Asset] = []
+        var parsedBalances: [AssetBalance] = []
+
+        for balanceInfo in balancesArray {
+            guard let assetInfo = balanceInfo["asset_info"] as? [String: Any],
+                  let assetId = assetInfo["asset_id"] as? String else {
+                continue
             }
+
+            // Parse asset info
+            let ticker = assetInfo["ticker"] as? String ?? ""
+            let fullName = assetInfo["full_name"] as? String ?? ""
+            let decimalPoint = assetInfo["decimal_point"] as? Int ?? 12
+            let totalMaxSupply = (assetInfo["total_max_supply"] as? NSNumber)?.uint64Value ?? 0
+            let currentSupply = (assetInfo["current_supply"] as? NSNumber)?.uint64Value ?? 0
+            let metaInfo = assetInfo["meta_info"] as? String
+
+            let asset = Asset(
+                assetId: assetId,
+                ticker: ticker,
+                fullName: fullName,
+                decimalPoint: decimalPoint,
+                totalMaxSupply: totalMaxSupply,
+                currentSupply: currentSupply,
+                metaInfo: metaInfo
+            )
+            parsedAssets.append(asset)
+
+            // Parse balance
+            let total = (balanceInfo["total"] as? NSNumber)?.int64Value ?? 0
+            let unlocked = (balanceInfo["unlocked"] as? NSNumber)?.int64Value ?? 0
+            let awaitingIn = (balanceInfo["awaiting_in"] as? NSNumber)?.int64Value ?? 0
+            let awaitingOut = (balanceInfo["awaiting_out"] as? NSNumber)?.int64Value ?? 0
+
+            let balance = AssetBalance(
+                assetId: assetId,
+                total: total,
+                unlocked: unlocked,
+                awaitingIn: awaitingIn,
+                awaitingOut: awaitingOut
+            )
+            parsedBalances.append(balance)
         }
+
+        assets = parsedAssets
+        balances = parsedBalances
     }
 
     private func onSyncStateChanged() {
@@ -264,13 +312,8 @@ class ZanoCore {
         let (result, _) = api.parseResponse(resultJson)
         guard let result = result else { return }
 
-        if let balances = result["balances"] as? [[String: Any]] {
-            parseBalances(balances)
-        } else {
-            // Fallback to simple balance fields
-            let all = result["balance"] as? Int64 ?? 0
-            let unlocked = result["unlocked_balance"] as? Int64 ?? 0
-            balance = Balance(all: all, unlocked: unlocked)
+        if let balancesArray = result["balances"] as? [[String: Any]] {
+            parseBalancesResponse(balancesArray)
         }
     }
 
@@ -313,9 +356,8 @@ class ZanoCore {
                 guard let txHash = tx["tx_hash"] as? String else { continue }
 
                 let isIncome = tx["is_income"] as? Bool ?? false
-                let amount = tx["amount"] as? Int64 ?? 0
-                let fee = tx["fee"] as? UInt64 ?? 0
-                let height = tx["height"] as? UInt64 ?? 0
+                let fee = (tx["fee"] as? NSNumber)?.uint64Value ?? 0
+                let height = (tx["height"] as? NSNumber)?.uint64Value ?? 0
                 let timestamp = tx["timestamp"] as? Int ?? 0
                 let comment = tx["comment"] as? String
 
@@ -327,20 +369,55 @@ class ZanoCore {
 
                 let type: TransactionType = isIncome ? .incoming : .outgoing
 
-                let transaction = Transaction(
-                    hash: txHash,
-                    type: type,
-                    blockHeight: height,
-                    amount: isIncome ? amount : -amount,
-                    fee: fee,
-                    isPending: height == 0,
-                    isFailed: false,
-                    timestamp: timestamp,
-                    note: comment,
-                    recipientAddress: remoteAddress
-                )
+                // Parse subtransfers for multi-asset support
+                if let subtransfers = tx["subtransfers"] as? [[String: Any]], !subtransfers.isEmpty {
+                    for subtransfer in subtransfers {
+                        let assetId = subtransfer["asset_id"] as? String ?? ZanoAssetId
+                        let amount = (subtransfer["amount"] as? NSNumber)?.uint64Value ?? 0
+                        // Each subtransfer can have its own is_income flag
+                        let subtransferIsIncome = subtransfer["is_income"] as? Bool ?? isIncome
+                        let subtransferType: TransactionType = subtransferIsIncome ? .incoming : .outgoing
 
-                fetchedTransactions.append(transaction)
+                        // Skip fee subtransfer - when sending non-native assets, the fee (in ZANO) appears
+                        // as a separate subtransfer. We skip it since fee is already tracked in the fee field.
+                        if !subtransferIsIncome && assetId == ZanoAssetId && amount == fee {
+                            continue
+                        }
+
+                        let transaction = Transaction(
+                            hash: txHash,
+                            assetId: assetId,
+                            type: subtransferType,
+                            blockHeight: height,
+                            amount: Int64(amount),
+                            fee: fee,
+                            isPending: height == 0,
+                            isFailed: false,
+                            timestamp: timestamp,
+                            note: comment,
+                            recipientAddress: remoteAddress
+                        )
+                        fetchedTransactions.append(transaction)
+                    }
+                } else {
+                    // Fallback for transactions without subtransfers (native ZANO)
+                    let amount = (tx["amount"] as? NSNumber)?.int64Value ?? 0
+
+                    let transaction = Transaction(
+                        hash: txHash,
+                        assetId: ZanoAssetId,
+                        type: type,
+                        blockHeight: height,
+                        amount: abs(amount),
+                        fee: fee,
+                        isPending: height == 0,
+                        isFailed: false,
+                        timestamp: timestamp,
+                        note: comment,
+                        recipientAddress: remoteAddress
+                    )
+                    fetchedTransactions.append(transaction)
+                }
             }
         }
 
@@ -381,16 +458,25 @@ class ZanoCore {
 
     // MARK: - Send Transaction
 
-    func send(to address: String, amount: UInt64, fee: UInt64, mixin: Int = 10, comment: String?) throws -> String {
+    func send(to address: String, assetId: String = ZanoAssetId, amount: UInt64, fee: UInt64, mixin: Int = 10, comment: String?) throws -> String {
         guard let wid = walletId else {
             throw ZanoCoreError.walletNotInitialized
         }
 
+        // Build destination with asset_id
+        var destination: [String: Any] = [
+            "address": address,
+            "amount": amount
+        ]
+
+        // Only include asset_id if not native ZANO
+        if assetId != ZanoAssetId {
+            destination["asset_id"] = assetId
+        }
+
         // Build the transfer params
         var transferParams: [String: Any] = [
-            "destinations": [
-                ["address": address, "amount": amount]
-            ],
+            "destinations": [destination],
             "fee": fee,
             "mixin": mixin
         ]
@@ -425,6 +511,16 @@ class ZanoCore {
         return txHash
     }
 
+    // MARK: - Balance Helpers
+
+    func getBalance(forAssetId assetId: String) -> AssetBalance? {
+        balances.first { $0.assetId == assetId }
+    }
+
+    func getNativeBalance() -> AssetBalance? {
+        getBalance(forAssetId: ZanoAssetId)
+    }
+
     // MARK: - Static Methods
 
     static func isValid(address: String) -> Bool {
@@ -434,8 +530,35 @@ class ZanoCore {
 
     // MARK: - Internal Types
 
+    struct Asset {
+        let assetId: String
+        let ticker: String
+        let fullName: String
+        let decimalPoint: Int
+        let totalMaxSupply: UInt64
+        let currentSupply: UInt64
+        let metaInfo: String?
+    }
+
+    struct AssetBalance: Equatable {
+        let assetId: String
+        let total: Int64
+        let unlocked: Int64
+        let awaitingIn: Int64
+        let awaitingOut: Int64
+
+        static func == (lhs: AssetBalance, rhs: AssetBalance) -> Bool {
+            lhs.assetId == rhs.assetId &&
+            lhs.total == rhs.total &&
+            lhs.unlocked == rhs.unlocked &&
+            lhs.awaitingIn == rhs.awaitingIn &&
+            lhs.awaitingOut == rhs.awaitingOut
+        }
+    }
+
     struct Transaction {
         let hash: String
+        let assetId: String
         let type: TransactionType
         let blockHeight: UInt64
         let amount: Int64
@@ -446,24 +569,11 @@ class ZanoCore {
         let note: String?
         let recipientAddress: String?
     }
-
-    struct Balance: Equatable {
-        let all: Int64
-        let unlocked: Int64
-
-        init(all: Int64, unlocked: Int64) {
-            self.all = all
-            self.unlocked = unlocked
-        }
-
-        static func == (lhs: Balance, rhs: Balance) -> Bool {
-            lhs.all == rhs.all && lhs.unlocked == rhs.unlocked
-        }
-    }
 }
 
 protocol ZanoCoreDelegate: AnyObject {
-    func balanceDidChange(balance: ZanoCore.Balance)
+    func assetsDidChange(assets: [ZanoCore.Asset])
+    func balancesDidChange(balances: [ZanoCore.AssetBalance])
     func transactionsDidChange(transactions: [ZanoCore.Transaction])
     func walletStateDidChange(state: WalletState)
 }
