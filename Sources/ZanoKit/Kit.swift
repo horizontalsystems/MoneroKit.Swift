@@ -12,7 +12,7 @@ public class Kit {
 
     public weak var delegate: ZanoKitDelegate?
 
-    public init(wallet: ZanoWallet, walletId: String, node: Node, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32? = nil) throws {
+    public init(wallet: ZanoWallet, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32? = nil) throws {
         let baseDirectoryName = "ZanoKit/\(walletId)/network_\(networkType.rawValue)"
         let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
 
@@ -31,7 +31,7 @@ public class Kit {
             walletPath: walletPath,
             workingDir: workingDir,
             walletPassword: walletId,
-            node: node,
+            daemonAddress: daemonAddress,
             networkType: networkType,
             reachabilityManager: reachabilityManager,
             logger: logger,
@@ -54,6 +54,13 @@ public class Kit {
         return storage.getBlockHeights()?.walletHeight ?? 0
     }
 
+    public var daemonBlockHeight: UInt64 {
+        if let heights = zanoCore.blockHeights {
+            return heights.1
+        }
+        return storage.getBlockHeights()?.daemonHeight ?? 0
+    }
+
     public var walletState: WalletState {
         zanoCore.state
     }
@@ -69,7 +76,7 @@ public class Kit {
             info.append(("Wallet Height", heights.0))
             info.append(("Daemon Height", heights.1))
         }
-        info.append(("Node", zanoCore.node.url.absoluteString))
+        info.append(("Node", zanoCore.daemonAddress))
         return info
     }
 
@@ -100,7 +107,7 @@ public class Kit {
     // MARK: - Transactions
 
     public func transactions(assetId: String? = nil, fromHash: String? = nil, descending: Bool = true, type: TransactionFilterType? = nil, limit: Int? = nil) -> [TransactionInfo] {
-        var fromTimestamp: Int? = nil
+        var fromTimestamp: Int?
         if let fromHash {
             fromTimestamp = storage.transaction(byHash: fromHash)?.timestamp
         }
@@ -163,7 +170,7 @@ public class Kit {
         let amountValue: UInt64
 
         switch amount {
-        case .value(let value):
+        case let .value(value):
             amountValue = UInt64(value)
         case .all:
             // For send all, use unlocked balance
@@ -265,7 +272,7 @@ public extension Kit {
         try FileHandler.removeAll(except: excludedFiles)
     }
 
-    static func isValid(address: String, networkType: NetworkType) -> Bool {
+    static func isValid(address: String, networkType _: NetworkType) -> Bool {
         ZanoCore.isValid(address: address)
     }
 }

@@ -1,6 +1,6 @@
 import HsToolKit
-import ZanoKit
 import SwiftUI
+import ZanoKit
 
 struct ZanoContentView: View {
     @Binding var zanoKit: ZanoKit.Kit?
@@ -35,7 +35,7 @@ struct ZanoContentView: View {
             .padding()
             .navigationTitle("Zano Wallet")
             .alert("Error", isPresented: $showError) {
-                Button("OK", role: .cancel) { }
+                Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "Unknown error")
             }
@@ -43,12 +43,11 @@ struct ZanoContentView: View {
     }
 
     private func connectToWallet() {
-        guard let url = URL(string: daemonAddress) else {
+        guard let nodeUrl = URL(string: daemonAddress) else {
             errorMessage = "Invalid daemon URL"
             showError = true
             return
         }
-        let node = ZanoKit.Node(url: url, isTrusted: true)
         let seed = mnemonicSeed.components(separatedBy: " ")
 
         let wallet: ZanoWallet
@@ -68,11 +67,11 @@ struct ZanoContentView: View {
             let kit = try Kit(
                 wallet: wallet,
                 walletId: walletId,
-                node: node,
+                daemonAddress: nodeUrl.absoluteString,
                 networkType: .mainnet,
                 reachabilityManager: ReachabilityManager(),
                 logger: Logger(minLogLevel: .verbose),
-                zanoCoreLogLevel: 2
+                zanoCoreLogLevel: 1
             )
             kit.delegate = walletState
             kit.start()

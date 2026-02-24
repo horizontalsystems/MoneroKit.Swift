@@ -14,13 +14,13 @@ class ZanoWalletAPI {
 
     private func logRequest(_ method: String, params: String? = nil) {
         logger?.debug("📤 [ZANO API] \(method)")
-        if let params = params {
+        if let params {
             logger?.debug("   Request: \(params.prettyPrintedJSON() ?? params)")
         }
     }
 
     private func logResponse(_ method: String, response: String?) {
-        if let response = response {
+        if let response {
             logger?.debug("📥 [ZANO API] \(method) Response:")
             logger?.debug("   \(response.prettyPrintedJSON() ?? response)")
         } else {
@@ -32,12 +32,12 @@ class ZanoWalletAPI {
 
     func initLibrary(daemonAddress: String, workingDir: String, logLevel: Int32) -> String? {
         logRequest("ZANO_PlainWallet_init", params: """
-            {
-                "daemon_address": "\(daemonAddress)",
-                "working_dir": "\(workingDir)",
-                "log_level": \(logLevel)
-            }
-            """)
+        {
+            "daemon_address": "\(daemonAddress)",
+            "working_dir": "\(workingDir)",
+            "log_level": \(logLevel)
+        }
+        """)
 
         let result = stringFromCString(ZANO_PlainWallet_init(
             (daemonAddress as NSString).utf8String,
@@ -62,11 +62,11 @@ class ZanoWalletAPI {
 
     func openWallet(path: String, password: String) -> String? {
         logRequest("ZANO_PlainWallet_open", params: """
-            {
-                "path": "\(path)",
-                "password": "***"
-            }
-            """)
+        {
+            "path": "\(path)",
+            "password": "***"
+        }
+        """)
 
         let result = stringFromCString(ZANO_PlainWallet_open(
             (path as NSString).utf8String,
@@ -81,13 +81,13 @@ class ZanoWalletAPI {
 
     func restoreWallet(seed: String, path: String, password: String, passphrase: String, seedWordsCount: Int) -> String? {
         logRequest("ZANO_PlainWallet_restore", params: """
-            {
-                "seed": "*** (\(seedWordsCount) words)",
-                "path": "\(path)",
-                "password": "***",
-                "passphrase": "\(passphrase.isEmpty ? "(empty)" : "***")"
-            }
-            """)
+        {
+            "seed": "*** (\(seedWordsCount) words)",
+            "path": "\(path)",
+            "password": "***",
+            "passphrase": "\(passphrase.isEmpty ? "(empty)" : "***")"
+        }
+        """)
 
         let result = stringFromCString(ZANO_PlainWallet_restore(
             (seed as NSString).utf8String,
@@ -119,12 +119,13 @@ class ZanoWalletAPI {
 
     func invoke(walletId: Int64, method: String, params: [String: Any]? = nil) -> String? {
         var request: [String: Any] = ["method": method]
-        if let params = params {
+        if let params {
             request["params"] = params
         }
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: request),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
+              let jsonString = String(data: jsonData, encoding: .utf8)
+        else {
             logger?.error("Failed to serialize invoke request for method: \(method)")
             return nil
         }
@@ -190,6 +191,22 @@ class ZanoWalletAPI {
     static func estimateFee(priority: UInt64) -> UInt64 {
         ZANO_PlainWallet_getCurrentTxFee(priority)
     }
+
+    // MARK: - Timestamp from Seed Word
+
+    /// Get timestamp embedded in the last word of a legacy Zano seed
+    func getTimestampFromWord(_ word: String) -> UInt64 {
+        logRequest("ZANO_getTimestampFromWord", params: "{\"word\": \"\(word)\"}")
+
+        var passwordUsed = false
+        let timestamp = ZANO_getTimestampFromWord(
+            (word as NSString).utf8String,
+            &passwordUsed
+        )
+
+        logResponse("ZANO_getTimestampFromWord", response: "{\"timestamp\": \(timestamp), \"password_used\": \(passwordUsed)}")
+        return timestamp
+    }
 }
 
 // MARK: - Response Parsing Helpers
@@ -197,9 +214,10 @@ class ZanoWalletAPI {
 extension ZanoWalletAPI {
     /// Parse a JSON response and extract the result
     func parseResponse(_ json: String?) -> (result: [String: Any]?, error: (code: Int, message: String)?) {
-        guard let json = json,
+        guard let json,
               let data = json.data(using: .utf8),
-              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return (nil, (code: -1, message: "Invalid JSON response"))
         }
 
@@ -222,7 +240,8 @@ extension ZanoWalletAPI {
     func isValidAddress(_ address: String) -> Bool {
         guard let resultJson = getAddressInfo(address: address),
               let data = resultJson.data(using: .utf8),
-              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return false
         }
         return response["valid"] as? Bool ?? false

@@ -20,32 +20,39 @@ class ZanoCore {
 
     // Zano uses wallet_id (int64) instead of pointer
     private(set) var walletId: Int64?
-    var node: Node
+    var daemonAddress: String
 
-    private var assets: [Asset] = [] {
-        didSet {
-            globalEventQueue.async { [weak self] in
-                guard let self else { return }
-                delegate?.assetsDidChange(assets: assets)
-            }
+    private var assets: [Asset] = []
+    private var balances: [AssetBalance] = []
+    private var transactions: [Transaction] = []
+
+    /// Update assets only if changed, then notify delegate
+    private func updateAssets(_ newAssets: [Asset]) {
+        guard assets != newAssets else { return }
+        assets = newAssets
+        globalEventQueue.async { [weak self] in
+            guard let self else { return }
+            delegate?.assetsDidChange(assets: assets)
         }
     }
 
-    private var balances: [AssetBalance] = [] {
-        didSet {
-            globalEventQueue.async { [weak self] in
-                guard let self else { return }
-                delegate?.balancesDidChange(balances: balances)
-            }
+    /// Update balances only if changed, then notify delegate
+    private func updateBalances(_ newBalances: [AssetBalance]) {
+        guard balances != newBalances else { return }
+        balances = newBalances
+        globalEventQueue.async { [weak self] in
+            guard let self else { return }
+            delegate?.balancesDidChange(balances: balances)
         }
     }
 
-    private var transactions: [Transaction] = [] {
-        didSet {
-            globalEventQueue.async { [weak self] in
-                guard let self else { return }
-                delegate?.transactionsDidChange(transactions: transactions)
-            }
+    /// Update transactions only if changed, then notify delegate
+    private func updateTransactions(_ newTransactions: [Transaction]) {
+        guard transactions != newTransactions else { return }
+        transactions = newTransactions
+        globalEventQueue.async { [weak self] in
+            guard let self else { return }
+            delegate?.transactionsDidChange(transactions: transactions)
         }
     }
 
@@ -59,17 +66,32 @@ class ZanoCore {
         stateManager.blockHeights
     }
 
-    init(wallet: ZanoWallet, walletPath: String, workingDir: String, walletPassword: String, node: Node, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32?) {
+    init(wallet: ZanoWallet, walletPath: String, workingDir: String, walletPassword: String, daemonAddress: String, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32?) {
         self.wallet = wallet
         self.walletPath = walletPath
         self.workingDir = workingDir
         self.walletPassword = walletPassword
-        self.node = node
+        self.daemonAddress = daemonAddress
         self.networkType = networkType
         self.logger = logger
         self.zanoCoreLogLevel = zanoCoreLogLevel ?? 0
-        self.api = ZanoWalletAPI(logger: logger)
-        stateManager = SyncStateManager(api: api, logger: logger, restoreHeight: 0, reachabilityManager: reachabilityManager)
+        api = ZanoWalletAPI(logger: logger)
+
+        // Calculate restore height based on wallet type
+        let restoreHeight: UInt64
+        switch wallet {
+        case let .bip39(_, _, creationTimestamp):
+            restoreHeight = UInt64(RestoreHeight.getHeight(timestamp: creationTimestamp))
+        case let .legacy(seed, _):
+            // Timestamp word is at index 24 for both:
+            // - 25 words: 24 seed words + 1 timestamp word
+            // - 26 words: 24 seed words + 1 timestamp word + 1 checksum word
+            let timestampWord = seed.count >= 25 ? seed[24] : ""
+            let timestamp = api.getTimestampFromWord(timestampWord)
+            restoreHeight = UInt64(RestoreHeight.getHeight(timestamp: timestamp))
+        }
+
+        stateManager = SyncStateManager(api: api, logger: logger, restoreHeight: restoreHeight, reachabilityManager: reachabilityManager)
 
         stateManager.onSyncStateChanged = { [weak self] in
             self?.onSyncStateChanged()
@@ -78,6 +100,13 @@ class ZanoCore {
         stateManager.onSyncedPoll = { [weak self] in
             self?.walletQueue.async {
                 self?.refresh()
+            }
+        }
+
+        stateManager.onBlockHeightsChanged = { [weak self] _, _ in
+            self?.globalEventQueue.async { [weak self] in
+                guard let self else { return }
+                delegate?.walletStateDidChange(state: state)
             }
         }
     }
@@ -89,8 +118,7 @@ class ZanoCore {
     // MARK: - Wallet Operations
 
     private func initializeLibrary() throws {
-        let daemonAddress = node.url.absoluteString
-        let _ = api.initLibrary(daemonAddress: daemonAddress, workingDir: workingDir, logLevel: zanoCoreLogLevel)
+        _ = api.initLibrary(daemonAddress: daemonAddress, workingDir: workingDir, logLevel: zanoCoreLogLevel)
     }
 
     private func openOrRestoreWallet() throws {
@@ -104,10 +132,10 @@ class ZanoCore {
             logger?.debug("Restoring wallet to: \(walletPath)")
 
             switch wallet {
-            case .bip39(let words, let passphrase, let creationTimestamp):
+            case let .bip39(words, passphrase, creationTimestamp):
                 resultJson = try restoreFromBip39(words: words, passphrase: passphrase, creationTimestamp: creationTimestamp)
 
-            case .legacy(let words, let passphrase):
+            case let .legacy(words, passphrase):
                 let seed = words.joined(separator: " ")
                 resultJson = api.restoreWallet(
                     seed: seed,
@@ -126,12 +154,14 @@ class ZanoCore {
         // Parse the response to get wallet_id and address
         guard let data = json.data(using: .utf8),
               let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = response["result"] as? [String: Any] else {
+              let result = response["result"] as? [String: Any]
+        else {
             // Check for error
             if let data = json.data(using: .utf8),
                let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let error = response["error"] as? [String: Any],
-               let message = error["message"] as? String {
+               let message = error["message"] as? String
+            {
                 throw ZanoCoreError.walletRecoveryFailed(message)
             }
             throw ZanoCoreError.walletRecoveryFailed("Failed to parse wallet response")
@@ -145,7 +175,8 @@ class ZanoCore {
 
         // Extract address from wi (wallet info)
         if let wi = result["wi"] as? [String: Any],
-           let address = wi["address"] as? String {
+           let address = wi["address"] as? String
+        {
             walletAddress = address
             logger?.debug("Wallet address: \(address)")
 
@@ -163,52 +194,26 @@ class ZanoCore {
         // Derive 32-byte secret from BIP39 mnemonic
         let secretDerivation = try secretDerivationFromBip39(mnemonic: words, passphrase: passphrase)
 
-        logger?.debug("Restoring wallet from BIP39 derivation")
-        logger?.debug("   Words count: \(words.count)")
-        logger?.debug("   Passphrase: \(passphrase.isEmpty ? "(empty)" : "(provided)")")
-        logger?.debug("   Creation timestamp: \(creationTimestamp)")
-
-        // Convert timestamp to human-readable date for logging
-        let date = Date(timeIntervalSince1970: TimeInterval(creationTimestamp))
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        logger?.debug("   Creation date (UTC): \(formatter.string(from: date))")
-
         // Build params for restore_from_derivations
         let params: [String: Any] = [
             "pass": walletPassword,
             "path": walletPath,
             "secret_derivation": secretDerivation,
             "is_auditable": false,
-            "creation_timestamp": creationTimestamp
+            "creation_timestamp": creationTimestamp,
         ]
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: params, options: .sortedKeys),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
+              let jsonString = String(data: jsonData, encoding: .utf8)
+        else {
             throw ZanoCoreError.walletRecoveryFailed("Failed to build restore params")
-        }
-
-        // Build masked params for logging
-        let logParams: [String: Any] = [
-            "pass": "***",
-            "path": walletPath,
-            "secret_derivation": "\(secretDerivation.prefix(8))...\(secretDerivation.suffix(8))",
-            "is_auditable": false,
-            "creation_timestamp": creationTimestamp
-        ]
-        let logString: String?
-        if let logData = try? JSONSerialization.data(withJSONObject: logParams, options: [.prettyPrinted, .sortedKeys]) {
-            logString = String(data: logData, encoding: .utf8)
-        } else {
-            logString = nil
         }
 
         return api.syncCall(
             method: "restore_from_derivations",
             instanceId: 0,
             params: jsonString,
-            logParams: logString
+            logParams: nil
         )
     }
 
@@ -218,7 +223,8 @@ class ZanoCore {
 
         for balanceInfo in balancesArray {
             guard let assetInfo = balanceInfo["asset_info"] as? [String: Any],
-                  let assetId = assetInfo["asset_id"] as? String else {
+                  let assetId = assetInfo["asset_id"] as? String
+            else {
                 continue
             }
 
@@ -257,8 +263,8 @@ class ZanoCore {
             parsedBalances.append(balance)
         }
 
-        assets = parsedAssets
-        balances = parsedBalances
+        updateAssets(parsedAssets)
+        updateBalances(parsedBalances)
     }
 
     private func onSyncStateChanged() {
@@ -296,7 +302,7 @@ class ZanoCore {
 
     private func storeWallet() {
         guard let wid = walletId else { return }
-        let _ = api.invoke(walletId: wid, method: "store")
+        _ = api.invoke(walletId: wid, method: "store")
     }
 
     func updateBalance() {
@@ -310,7 +316,7 @@ class ZanoCore {
         guard let resultJson = api.invoke(walletId: wid, method: "getbalance") else { return }
 
         let (result, _) = api.parseResponse(resultJson)
-        guard let result = result else { return }
+        guard let result else { return }
 
         if let balancesArray = result["balances"] as? [[String: Any]] {
             parseBalancesResponse(balancesArray)
@@ -329,7 +335,7 @@ class ZanoCore {
         let params: [String: Any] = [
             "offset": 0,
             "count": 1000,
-            "update_provision_info": true
+            "update_provision_info": true,
         ]
 
         guard let resultJson = api.invoke(walletId: wid, method: "get_recent_txs_and_info", params: params) else {
@@ -339,12 +345,12 @@ class ZanoCore {
 
         let (result, error) = api.parseResponse(resultJson)
 
-        if let error = error {
+        if let error {
             logger?.debug("Fetch transactions error: \(error.code) - \(error.message)")
             return
         }
 
-        guard let result = result else {
+        guard let result else {
             // No result might just mean no transactions yet
             return
         }
@@ -359,15 +365,13 @@ class ZanoCore {
                 let fee = (tx["fee"] as? NSNumber)?.uint64Value ?? 0
                 let height = (tx["height"] as? NSNumber)?.uint64Value ?? 0
                 let timestamp = tx["timestamp"] as? Int ?? 0
-                let comment = tx["comment"] as? String
+                let comment = (tx["comment"] as? String).flatMap { $0.isEmpty ? nil : $0 }
 
                 // Determine remote address
-                var remoteAddress: String? = nil
+                var remoteAddress: String?
                 if let remoteAddresses = tx["remote_addresses"] as? [String], !remoteAddresses.isEmpty {
                     remoteAddress = remoteAddresses.first
                 }
-
-                let type: TransactionType = isIncome ? .incoming : .outgoing
 
                 // Parse subtransfers for multi-asset support
                 if let subtransfers = tx["subtransfers"] as? [[String: Any]], !subtransfers.isEmpty {
@@ -380,7 +384,7 @@ class ZanoCore {
 
                         // Skip fee subtransfer - when sending non-native assets, the fee (in ZANO) appears
                         // as a separate subtransfer. We skip it since fee is already tracked in the fee field.
-                        if !subtransferIsIncome && assetId == ZanoAssetId && amount == fee {
+                        if !subtransferIsIncome, assetId == ZanoAssetId, amount == fee {
                             continue
                         }
 
@@ -389,7 +393,7 @@ class ZanoCore {
                             assetId: assetId,
                             type: subtransferType,
                             blockHeight: height,
-                            amount: Int64(amount),
+                            amount: (!subtransferIsIncome && assetId == ZanoAssetId) ? Int64(amount - fee) : Int64(amount),
                             fee: fee,
                             isPending: height == 0,
                             isFailed: false,
@@ -401,6 +405,7 @@ class ZanoCore {
                     }
                 } else {
                     // Fallback for transactions without subtransfers (native ZANO)
+                    let type: TransactionType = isIncome ? .incoming : .outgoing
                     let amount = (tx["amount"] as? NSNumber)?.int64Value ?? 0
 
                     let transaction = Transaction(
@@ -408,7 +413,7 @@ class ZanoCore {
                         assetId: ZanoAssetId,
                         type: type,
                         blockHeight: height,
-                        amount: abs(amount),
+                        amount: isIncome ? abs(amount) : abs(amount) - Int64(fee),
                         fee: fee,
                         isPending: height == 0,
                         isFailed: false,
@@ -421,7 +426,7 @@ class ZanoCore {
             }
         }
 
-        transactions = fetchedTransactions.sorted { $0.timestamp > $1.timestamp }
+        updateTransactions(fetchedTransactions.sorted { $0.timestamp > $1.timestamp })
     }
 
     private func startWalletServices() {
@@ -447,7 +452,7 @@ class ZanoCore {
         stopWalletServices()
 
         guard let wid = walletId else { return }
-        let _ = api.closeWallet(walletId: wid)
+        _ = api.closeWallet(walletId: wid)
         walletId = nil
     }
 
@@ -466,7 +471,7 @@ class ZanoCore {
         // Build destination with asset_id
         var destination: [String: Any] = [
             "address": address,
-            "amount": amount
+            "amount": amount,
         ]
 
         // Only include asset_id if not native ZANO
@@ -478,11 +483,11 @@ class ZanoCore {
         var transferParams: [String: Any] = [
             "destinations": [destination],
             "fee": fee,
-            "mixin": mixin
+            "mixin": mixin,
         ]
 
         // Add comment if provided
-        if let comment = comment, !comment.isEmpty {
+        if let comment, !comment.isEmpty {
             transferParams["comment"] = comment
         }
 
@@ -492,14 +497,14 @@ class ZanoCore {
 
         let (result, error) = api.parseResponse(resultJson)
 
-        if let error = error {
+        if let error {
             if let matchedError = ZanoCoreError.match(error.message) {
                 throw matchedError
             }
             throw ZanoCoreError.transactionSendFailed(error.message)
         }
 
-        guard let result = result, let txHash = result["tx_hash"] as? String else {
+        guard let result, let txHash = result["tx_hash"] as? String else {
             throw ZanoCoreError.transactionSendFailed("No transaction hash in response")
         }
 
@@ -530,7 +535,7 @@ class ZanoCore {
 
     // MARK: - Internal Types
 
-    struct Asset {
+    struct Asset: Equatable {
         let assetId: String
         let ticker: String
         let fullName: String
@@ -549,14 +554,14 @@ class ZanoCore {
 
         static func == (lhs: AssetBalance, rhs: AssetBalance) -> Bool {
             lhs.assetId == rhs.assetId &&
-            lhs.total == rhs.total &&
-            lhs.unlocked == rhs.unlocked &&
-            lhs.awaitingIn == rhs.awaitingIn &&
-            lhs.awaitingOut == rhs.awaitingOut
+                lhs.total == rhs.total &&
+                lhs.unlocked == rhs.unlocked &&
+                lhs.awaitingIn == rhs.awaitingIn &&
+                lhs.awaitingOut == rhs.awaitingOut
         }
     }
 
-    struct Transaction {
+    struct Transaction: Equatable {
         let hash: String
         let assetId: String
         let type: TransactionType
@@ -568,6 +573,25 @@ class ZanoCore {
         let timestamp: Int
         let note: String?
         let recipientAddress: String?
+
+        /// Unique identifier for the transaction (hash + assetId)
+        var uid: String {
+            "\(hash)_\(assetId)"
+        }
+
+        static func == (lhs: Transaction, rhs: Transaction) -> Bool {
+            lhs.hash == rhs.hash &&
+                lhs.assetId == rhs.assetId &&
+                lhs.type == rhs.type &&
+                lhs.blockHeight == rhs.blockHeight &&
+                lhs.amount == rhs.amount &&
+                lhs.fee == rhs.fee &&
+                lhs.isPending == rhs.isPending &&
+                lhs.isFailed == rhs.isFailed &&
+                lhs.timestamp == rhs.timestamp &&
+                lhs.note == rhs.note &&
+                lhs.recipientAddress == rhs.recipientAddress
+        }
     }
 }
 

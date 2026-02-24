@@ -1,5 +1,5 @@
-import ZanoKit
 import SwiftUI
+import ZanoKit
 
 struct ZanoSendView: View {
     @Binding var zanoKit: Kit?

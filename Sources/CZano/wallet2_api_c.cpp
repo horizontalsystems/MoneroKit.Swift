@@ -317,6 +317,18 @@ const char* ZANO_checksum_wallet2_api_c_exp() {
     return ZANO_wallet2_api_c_exp_sha256;
 }
 
+uint64_t ZANO_getTimestampFromWord(const char* word, bool* password_used) {
+    DEBUG_START()
+    bool pw_used = false;
+    uint64_t timestamp = plain_wallet::get_timestamp_from_word(std::string(word), pw_used);
+    if (password_used != nullptr) {
+        *password_used = pw_used;
+    }
+    return timestamp;
+    DEBUG_END()
+}
+
+
 #ifdef __cplusplus
 }
 #endif

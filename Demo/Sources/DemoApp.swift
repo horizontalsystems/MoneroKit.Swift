@@ -6,8 +6,8 @@
 //
 
 import MoneroKit
-import ZanoKit
 import SwiftUI
+import ZanoKit
 
 enum WalletType: String, CaseIterable {
     case monero = "Monero"

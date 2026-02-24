@@ -1,5 +1,5 @@
-import ZanoKit
 import SwiftUI
+import ZanoKit
 
 struct ZanoWalletDashboardView: View {
     @Binding var zanoKit: Kit?
@@ -10,6 +10,7 @@ struct ZanoWalletDashboardView: View {
             Section(header: Text("Wallet Status")) {
                 Text("State: \(stateDescription(walletState.walletState))")
                 Text("Wallet Height: \(zanoKit?.lastBlockInfo ?? 0)")
+                Text("Daemon Height: \(zanoKit?.daemonBlockHeight ?? 0)")
             }
 
             Section(header: Text("Balances")) {
@@ -69,6 +70,8 @@ struct ZanoWalletDashboardView: View {
                         let asset = walletState.assets.first { $0.assetId == tx.assetId }
                         let ticker = asset?.ticker ?? "ZANO"
                         let decimals = asset?.decimalPoint ?? 12
+                        let daemonHeight = zanoKit?.daemonBlockHeight ?? 0
+                        let confirmations = tx.isPending ? 0 : (daemonHeight >= tx.blockHeight ? Int(daemonHeight - tx.blockHeight + 1) : 0)
 
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -78,6 +81,23 @@ struct ZanoWalletDashboardView: View {
                                     .padding(.vertical, 2)
                                     .background(tx.type == .incoming ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
                                     .cornerRadius(4)
+
+                                if tx.isPending {
+                                    Text("Pending")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.orange.opacity(0.2))
+                                        .cornerRadius(4)
+                                } else {
+                                    Text("\(confirmations) conf")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(confirmations >= 10 ? Color.green.opacity(0.2) : Color.yellow.opacity(0.2))
+                                        .cornerRadius(4)
+                                }
+
                                 Spacer()
                                 Text(ticker)
                                     .font(.caption)
@@ -90,6 +110,11 @@ struct ZanoWalletDashboardView: View {
                                 .foregroundColor(.secondary)
                             if let recipient = tx.recipientAddress {
                                 Text("To: \(recipient.prefix(20))...")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            if let memo = tx.memo, !memo.isEmpty {
+                                Text("Comment: \(memo)")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }

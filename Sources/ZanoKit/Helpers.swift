@@ -54,10 +54,11 @@ func readBytes(_ bytes: [UInt8]) -> BigUInt {
 
 extension String {
     func prettyPrintedJSON() -> String? {
-        guard let data = self.data(using: .utf8),
+        guard let data = data(using: .utf8),
               let jsonObject = try? JSONSerialization.jsonObject(with: data),
               let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: .prettyPrinted),
-              let prettyString = String(data: prettyData, encoding: .utf8) else {
+              let prettyString = String(data: prettyData, encoding: .utf8)
+        else {
             return nil
         }
         return prettyString

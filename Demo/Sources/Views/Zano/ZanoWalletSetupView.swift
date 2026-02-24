@@ -1,5 +1,5 @@
-import ZanoKit
 import SwiftUI
+import ZanoKit
 
 struct ZanoWalletSetupView: View {
     @Binding var mnemonicSeed: String

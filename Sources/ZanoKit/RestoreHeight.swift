@@ -8,9 +8,9 @@ public class RestoreHeight {
     // Block heights retrieved from daemon via JSON-RPC on 2026-02-18
     private static let blockHeights: [String: Int64] = [
         // 2019 - Genesis was May 9, 2019
-        "2019-05-01": 0,        // Before genesis
-        "2019-06-01": 33_753,
-        "2019-07-01": 76_449,
+        "2019-05-01": 0, // Before genesis
+        "2019-06-01": 33753,
+        "2019-07-01": 76449,
         "2019-08-01": 120_919,
         "2019-09-01": 164_985,
         "2019-10-01": 207_604,
@@ -114,6 +114,72 @@ public class RestoreHeight {
     public static func getHeight(timestamp: UInt64) -> Int64 {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         return getHeight(date: date)
+    }
+
+    public static func getDate(height: Int64) -> Date {
+        let utcTimeZone = TimeZone(identifier: "UTC")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utcTimeZone
+
+        let formatter = DateFormatter()
+        formatter.timeZone = utcTimeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        // Zano genesis: May 9, 2019
+        let genesisDate = formatter.date(from: "2019-05-09")!
+
+        // If height is 0 or negative, return genesis date
+        guard height > 0 else {
+            return genesisDate
+        }
+
+        // Sort entries by height to find the bracketing pair
+        let sortedEntries = blockHeights.sorted { $0.value < $1.value }
+
+        // Find the two entries that bracket this height
+        var prevEntry: (key: String, value: Int64)?
+        var nextEntry: (key: String, value: Int64)?
+
+        for (index, entry) in sortedEntries.enumerated() {
+            if entry.value <= height {
+                prevEntry = entry
+                if index + 1 < sortedEntries.count {
+                    nextEntry = sortedEntries[index + 1]
+                } else {
+                    nextEntry = nil
+                }
+            } else {
+                break
+            }
+        }
+
+        guard let prev = prevEntry, let prevDate = formatter.date(from: prev.key) else {
+            return genesisDate
+        }
+
+        let estimatedDate: Date
+        if let next = nextEntry, let nextDate = formatter.date(from: next.key) {
+            // Interpolate between the two dates
+            let heightDiff = next.value - prev.value
+            let heightOffset = height - prev.value
+            let timeDiff = nextDate.timeIntervalSince(prevDate)
+            // Guard against division by zero
+            if heightDiff > 0 {
+                let timeOffset = timeDiff * Double(heightOffset) / Double(heightDiff)
+                estimatedDate = prevDate.addingTimeInterval(timeOffset)
+            } else {
+                estimatedDate = prevDate
+            }
+        } else {
+            // Height is beyond our last entry, estimate using block time
+            let heightOffset = height - prev.value
+            let dailyBlocks = Double(24 * 60 * 60) / Double(DIFFICULTY_TARGET)
+            let daysOffset = Double(heightOffset) / dailyBlocks
+            estimatedDate = prevDate.addingTimeInterval(daysOffset * 24 * 60 * 60)
+        }
+
+        // Cap at current date to avoid returning future dates
+        return min(estimatedDate, Date())
     }
 
     public static func maximumEstimatedHeight() -> Int64 {

@@ -20,12 +20,14 @@ class SyncStateManager {
     private var lastStoredBlockHeight: UInt64 = 0
     private var daemonHeight: UInt64 = 0
     private(set) var walletHeight: UInt64 = 0
+    private var lastRefreshedHeight: UInt64 = 0
     private(set) var blockHeights: (UInt64, UInt64)?
     private var isDaemonConnected: Bool = false
     private(set) var isInLongRefresh: Bool = false
 
     var onSyncStateChanged: (() -> Void)?
     var onSyncedPoll: (() -> Void)?
+    var onBlockHeightsChanged: ((UInt64, UInt64) -> Void)?
 
     var state: WalletState = .notSynced(error: WalletStateError.notStarted) {
         didSet {
@@ -73,7 +75,7 @@ class SyncStateManager {
         }
 
         // Check if synced (allow 1-2 blocks difference since daemon keeps getting new blocks)
-        if walletHeight + 2 >= daemonHeight && !isInLongRefresh {
+        if walletHeight + 2 >= daemonHeight, !isInLongRefresh {
             return .synced
         }
 
@@ -97,7 +99,8 @@ class SyncStateManager {
         // Call get_wallet_status to get sync info
         guard let resultJson = api.getWalletStatus(walletId: wid),
               let data = resultJson.data(using: .utf8),
-              let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             logger?.error("Failed to get wallet status")
             scheduleNextCheck()
             return
@@ -114,6 +117,9 @@ class SyncStateManager {
         // }
 
         // JSON numbers come as NSNumber, need to convert properly
+        let prevWalletHeight = walletHeight
+        let prevDaemonHeight = daemonHeight
+
         if let height = status["current_wallet_height"] as? NSNumber {
             walletHeight = height.uint64Value
         }
@@ -127,12 +133,20 @@ class SyncStateManager {
             lastStoredBlockHeight = walletHeight
         }
 
+        // Notify when block heights change
+        if walletHeight != prevWalletHeight || daemonHeight != prevDaemonHeight {
+            blockHeights = (walletHeight, daemonHeight)
+            onBlockHeightsChanged?(walletHeight, daemonHeight)
+        }
+
         let newState = evaluateState()
         logger?.debug("Sync: wallet=\(walletHeight), daemon=\(daemonHeight), longRefresh=\(isInLongRefresh) -> \(newState.description)")
         state = newState
 
-        // Call onSyncedPoll every poll cycle when synced (for transaction detection)
-        if case .synced = newState {
+        // Call onSyncedPoll only when wallet height changed (new block received)
+        // Balance/transaction refresh only happens when height actually changes
+        if case .synced = newState, walletHeight > lastRefreshedHeight {
+            lastRefreshedHeight = walletHeight
             onSyncedPoll?()
         }
 

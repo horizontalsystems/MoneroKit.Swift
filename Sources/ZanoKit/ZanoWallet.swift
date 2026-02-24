@@ -5,7 +5,7 @@ public enum ZanoWallet {
     mutating func clear() {
         switch self {
         case .bip39:
-                self = .bip39(seed: [], passphrase: "", creationTimestamp: 0)
+            self = .bip39(seed: [], passphrase: "", creationTimestamp: 0)
         case .legacy:
             self = .legacy(seed: [], passphrase: "")
         }

@@ -62,6 +62,8 @@ extern ADDAPI const char* ZANO_checksum_wallet2_api_c_h();
 extern ADDAPI const char* ZANO_checksum_wallet2_api_c_cpp();
 extern ADDAPI const char* ZANO_checksum_wallet2_api_c_exp();
 
+extern ADDAPI uint64_t ZANO_getTimestampFromWord(const char* word, bool* password_used);
+
 #ifdef __cplusplus
 }
 #endif
