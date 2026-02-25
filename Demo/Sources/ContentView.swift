@@ -3,14 +3,14 @@ import MoneroKit
 import SwiftUI
 
 struct ContentView: View {
-    @Binding var moneroKit: Kit?
-    @ObservedObject var walletState: App_WalletState
+    @Binding var moneroKit: MoneroKit.Kit?
+    @ObservedObject var walletState: MoneroWalletState
 
     @State private var mnemonicSeed: String = ""
     @State private var passphrase: String = ""
     @State private var walletId: String = "wallet1"
     @State private var daemonAddress: String = "http://xmr-node.cakewallet.com:18081"
-    @State private var restoreHeight: String = "\(RestoreHeight.getHeight(date: Date()))"
+    @State private var restoreHeight: String = "3506000"
     @State private var mnemonicType: String = "BIP39"
 
     var body: some View {
@@ -39,7 +39,7 @@ struct ContentView: View {
         guard let url = URL(string: daemonAddress) else {
             return
         }
-        let node = Node(url: url, isTrusted: true)
+        let node = MoneroKit.Node(url: url, isTrusted: true)
         let seed = mnemonicSeed.components(separatedBy: " ")
 
         let wallet: MoneroWallet
