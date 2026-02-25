@@ -121,7 +121,7 @@ public struct TransactionInfo {
 // MARK: - Send
 
 public enum SendPriority: Int, CaseIterable {
-    case `default`, low, medium, high, last
+    case `default`, low, medium, high
 }
 
 public enum SendAmount {
