@@ -70,6 +70,17 @@ class GrdbStorage {
             }
         }
 
+        migrator.registerMigration("createSentTransfers") { db in
+            try db.create(table: SentTransfer.databaseTableName) { t in
+                t.column(SentTransfer.Columns.txHash.name, .text).notNull()
+                t.column(SentTransfer.Columns.assetId.name, .text).notNull()
+                t.column(SentTransfer.Columns.amount.name, .integer).notNull()
+                t.column(SentTransfer.Columns.address.name, .text).notNull()
+
+                t.primaryKey([SentTransfer.Columns.txHash.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 
@@ -157,6 +168,26 @@ class GrdbStorage {
             for transaction in transactions {
                 try transaction.insert(db)
             }
+        }
+    }
+
+    // MARK: - Sent Transfers
+
+    func saveSentTransfer(_ sentTransfer: SentTransfer) {
+        try! dbPool.write { db in
+            try sentTransfer.save(db)
+        }
+    }
+
+    func sentTransfer(byTxHash txHash: String) -> SentTransfer? {
+        try! dbPool.read { db in
+            try SentTransfer.filter(SentTransfer.Columns.txHash == txHash).fetchOne(db)
+        }
+    }
+
+    func allSentTransfers() -> [SentTransfer] {
+        try! dbPool.read { db in
+            try SentTransfer.fetchAll(db)
         }
     }
 

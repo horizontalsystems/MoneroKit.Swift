@@ -38,6 +38,11 @@ public class Kit {
             zanoCoreLogLevel: zanoCoreLogLevel
         )
 
+        // Restore in-memory sent transfer map from persisted GRDB records
+        zanoCore.sentTransfersMap = Dictionary(uniqueKeysWithValues: storage.allSentTransfers().map {
+            ($0.txHash, ZanoCore.SendResult(txHash: $0.txHash, assetId: $0.assetId, amount: UInt64(bitPattern: $0.amount), address: $0.address))
+        })
+
         zanoCore.delegate = self
     }
 
@@ -192,7 +197,9 @@ public class Kit {
             }
         }
 
-        return try zanoCore.send(to: address, assetId: assetId, amount: amountValue, fee: fee, comment: memo)
+        let result = try zanoCore.send(to: address, assetId: assetId, amount: amountValue, fee: fee, comment: memo)
+        storage.saveSentTransfer(SentTransfer(txHash: result.txHash, assetId: result.assetId, amount: Int64(bitPattern: result.amount), address: result.address))
+        return result.txHash
     }
 
     public func estimateFee(priority: SendPriority = .default) -> UInt64 {

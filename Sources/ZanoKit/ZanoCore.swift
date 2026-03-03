@@ -22,6 +22,10 @@ class ZanoCore {
     private(set) var walletId: Int64?
     var daemonAddress: String
 
+    // In-memory map of sent transfer info keyed by txHash.
+    // Kit populates this from GRDB on init and updates it after each send.
+    var sentTransfersMap: [String: SendResult] = [:]
+
     private var assets: [Asset] = []
     private var balances: [AssetBalance] = []
     private var transactions: [Transaction] = []
@@ -367,11 +371,20 @@ class ZanoCore {
                 let timestamp = tx["timestamp"] as? Int ?? 0
                 let comment = (tx["comment"] as? String).flatMap { $0.isEmpty ? nil : $0 }
 
-                // Determine remote address
+                // Determine remote address; fall back to cached info for transactions we sent
                 var remoteAddress: String?
                 if let remoteAddresses = tx["remote_addresses"] as? [String], !remoteAddresses.isEmpty {
                     remoteAddress = remoteAddresses.first
                 }
+                if remoteAddress == nil {
+                    remoteAddress = sentTransfersMap[txHash]?.address
+                }
+
+                // Detect self-send: recipient is the wallet's own address
+                let isSentToSelf = !walletAddress.isEmpty && remoteAddress == walletAddress
+
+                // Track how many records this transaction contributes (used below for self-send synthesis)
+                var txRecordsCreated = 0
 
                 // Parse subtransfers for multi-asset support
                 if let subtransfers = tx["subtransfers"] as? [[String: Any]], !subtransfers.isEmpty {
@@ -380,48 +393,169 @@ class ZanoCore {
                         let amount = (subtransfer["amount"] as? NSNumber)?.uint64Value ?? 0
                         // Each subtransfer can have its own is_income flag
                         let subtransferIsIncome = subtransfer["is_income"] as? Bool ?? isIncome
-                        let subtransferType: TransactionType = subtransferIsIncome ? .incoming : .outgoing
 
-                        // Skip fee subtransfer - when sending non-native assets, the fee (in ZANO) appears
-                        // as a separate subtransfer. We skip it since fee is already tracked in the fee field.
+                        // Skip fee subtransfer — the ZANO fee always appears as an outgoing subtransfer
+                        // equal to the fee amount. We skip it since fee is tracked in the fee field.
+                        // For self-sends this is the ONLY subtransfer; the sentToSelf record is
+                        // synthesized below from sentTransfers.
                         if !subtransferIsIncome, assetId == ZanoAssetId, amount == fee {
                             continue
                         }
 
-                        let transaction = Transaction(
+                        let subtransferType: TransactionType = isSentToSelf ? .sentToSelf : (subtransferIsIncome ? .incoming : .outgoing)
+
+                        // For regular outgoing native ZANO, subtract fee to get the net sent amount.
+                        // For all other cases use the amount as-is.
+                        let storedAmount: Int64
+                        if !subtransferIsIncome, assetId == ZanoAssetId, !isSentToSelf {
+                            storedAmount = Int64(amount - fee)
+                        } else {
+                            storedAmount = Int64(amount)
+                        }
+
+                        fetchedTransactions.append(Transaction(
                             hash: txHash,
                             assetId: assetId,
                             type: subtransferType,
                             blockHeight: height,
-                            amount: (!subtransferIsIncome && assetId == ZanoAssetId) ? Int64(amount - fee) : Int64(amount),
+                            amount: storedAmount,
                             fee: fee,
                             isPending: height == 0,
                             isFailed: false,
                             timestamp: timestamp,
                             note: comment,
                             recipientAddress: remoteAddress
-                        )
-                        fetchedTransactions.append(transaction)
+                        ))
+                        txRecordsCreated += 1
                     }
                 } else {
-                    // Fallback for transactions without subtransfers (native ZANO)
-                    let type: TransactionType = isIncome ? .incoming : .outgoing
-                    let amount = (tx["amount"] as? NSNumber)?.int64Value ?? 0
+                    // Fallback for transactions without subtransfers (native ZANO, non-self-send)
+                    if !isSentToSelf {
+                        let type: TransactionType = isIncome ? .incoming : .outgoing
+                        let amount = (tx["amount"] as? NSNumber)?.int64Value ?? 0
+                        let storedAmount: Int64 = isIncome ? abs(amount) : abs(amount) - Int64(fee)
 
-                    let transaction = Transaction(
-                        hash: txHash,
-                        assetId: ZanoAssetId,
-                        type: type,
-                        blockHeight: height,
-                        amount: isIncome ? abs(amount) : abs(amount) - Int64(fee),
-                        fee: fee,
-                        isPending: height == 0,
-                        isFailed: false,
-                        timestamp: timestamp,
-                        note: comment,
-                        recipientAddress: remoteAddress
-                    )
-                    fetchedTransactions.append(transaction)
+                        fetchedTransactions.append(Transaction(
+                            hash: txHash,
+                            assetId: ZanoAssetId,
+                            type: type,
+                            blockHeight: height,
+                            amount: storedAmount,
+                            fee: fee,
+                            isPending: height == 0,
+                            isFailed: false,
+                            timestamp: timestamp,
+                            note: comment,
+                            recipientAddress: remoteAddress
+                        ))
+                        txRecordsCreated += 1
+                    }
+                }
+
+                // Synthesize sentToSelf record when no subtransfer records were created.
+                // For self-sends the API puts only the fee subtransfer (which is skipped above),
+                // so the actual sent asset and amount must come from sentTransfers or employed_entries.
+                if isSentToSelf, txRecordsCreated == 0 {
+                    if let sentInfo = sentTransfersMap[txHash] {
+                        // Exact amount stored when we sent this transaction
+                        fetchedTransactions.append(Transaction(
+                            hash: txHash,
+                            assetId: sentInfo.assetId,
+                            type: .sentToSelf,
+                            blockHeight: height,
+                            amount: Int64(sentInfo.amount),
+                            fee: fee,
+                            isPending: height == 0,
+                            isFailed: false,
+                            timestamp: timestamp,
+                            note: comment,
+                            recipientAddress: remoteAddress
+                        ))
+                    } else if let employed = tx["employed_entries"] as? [String: Any] {
+                        // Fallback for historical self-sends (e.g. after app restart).
+                        // Parse received outputs grouped by asset to approximate the sent amount.
+                        let receiveEntries = (employed["receive"] as? [[String: Any]]) ?? []
+                        var receivedAmounts: [String: [UInt64]] = [:]
+                        for entry in receiveEntries {
+                            let eAssetId = entry["asset_id"] as? String ?? ZanoAssetId
+                            let eAmount = (entry["amount"] as? NSNumber)?.uint64Value ?? 0
+                            receivedAmounts[eAssetId, default: []].append(eAmount)
+                        }
+                        // If any CA was received, this is a CA self-send — skip the ZANO entries
+                        // since they are just fee-change outputs, not an actual ZANO transfer.
+                        let hasCAReceive = receivedAmounts.keys.contains { $0 != ZanoAssetId }
+                        for (assetId, amounts) in receivedAmounts {
+                            if assetId == ZanoAssetId, hasCAReceive { continue }
+                            // Use the minimum received amount as the best-effort sent amount
+                            // (for partial sends the sent amount is typically ≤ change)
+                            guard let sentAmount = amounts.min() else { continue }
+                            fetchedTransactions.append(Transaction(
+                                hash: txHash,
+                                assetId: assetId,
+                                type: .sentToSelf,
+                                blockHeight: height,
+                                amount: Int64(sentAmount),
+                                fee: fee,
+                                isPending: height == 0,
+                                isFailed: false,
+                                timestamp: timestamp,
+                                note: comment,
+                                recipientAddress: remoteAddress
+                            ))
+                        }
+                    }
+                }
+
+                // Detect CA self-sends where remote_addresses is absent and sentTransfers is empty
+                // (e.g. after app restart). For CA self-sends the API omits remote_addresses and
+                // places no CA entry in subtransfers — but employed_entries shows CA received == CA spent
+                // (net = 0), which is only possible when all funds returned to the same wallet.
+                if !isSentToSelf, txRecordsCreated == 0, !isIncome,
+                   let employed = tx["employed_entries"] as? [String: Any]
+                {
+                    let receiveEntries = (employed["receive"] as? [[String: Any]]) ?? []
+                    let spentEntries = (employed["spent"] as? [[String: Any]]) ?? []
+
+                    var receivedByAsset: [String: [UInt64]] = [:]
+                    for entry in receiveEntries {
+                        let eAssetId = entry["asset_id"] as? String ?? ZanoAssetId
+                        let eAmount = (entry["amount"] as? NSNumber)?.uint64Value ?? 0
+                        receivedByAsset[eAssetId, default: []].append(eAmount)
+                    }
+                    var totalSpentByAsset: [String: UInt64] = [:]
+                    for entry in spentEntries {
+                        let eAssetId = entry["asset_id"] as? String ?? ZanoAssetId
+                        let eAmount = (entry["amount"] as? NSNumber)?.uint64Value ?? 0
+                        totalSpentByAsset[eAssetId, default: 0] += eAmount
+                    }
+
+                    for (assetId, amounts) in receivedByAsset where assetId != ZanoAssetId {
+                        let totalReceived = amounts.reduce(0, +)
+                        guard let totalSpent = totalSpentByAsset[assetId],
+                              totalReceived == totalSpent, totalReceived > 0 else { continue }
+
+                        // CA received == CA spent: all funds returned to this wallet → CA self-send
+                        let sentAmount: UInt64
+                        if let sentInfo = sentTransfersMap[txHash], sentInfo.assetId == assetId {
+                            sentAmount = sentInfo.amount
+                        } else {
+                            // Heuristic: minimum individual output is the likely sent amount
+                            sentAmount = amounts.min() ?? totalReceived
+                        }
+                        fetchedTransactions.append(Transaction(
+                            hash: txHash,
+                            assetId: assetId,
+                            type: .sentToSelf,
+                            blockHeight: height,
+                            amount: Int64(sentAmount),
+                            fee: fee,
+                            isPending: height == 0,
+                            isFailed: false,
+                            timestamp: timestamp,
+                            note: comment,
+                            recipientAddress: walletAddress.isEmpty ? nil : walletAddress
+                        ))
+                    }
                 }
             }
         }
@@ -463,7 +597,7 @@ class ZanoCore {
 
     // MARK: - Send Transaction
 
-    func send(to address: String, assetId: String = ZanoAssetId, amount: UInt64, fee: UInt64, mixin: Int = 10, comment: String?) throws -> String {
+    func send(to address: String, assetId: String = ZanoAssetId, amount: UInt64, fee: UInt64, mixin: Int = 10, comment: String?) throws -> SendResult {
         guard let wid = walletId else {
             throw ZanoCoreError.walletNotInitialized
         }
@@ -508,12 +642,15 @@ class ZanoCore {
             throw ZanoCoreError.transactionSendFailed("No transaction hash in response")
         }
 
+        let sendResult = SendResult(txHash: txHash, assetId: assetId, amount: amount, address: address)
+        sentTransfersMap[txHash] = sendResult
+
         // Refresh to update balance and transactions
         walletQueue.async { [weak self] in
             self?.refresh()
         }
 
-        return txHash
+        return sendResult
     }
 
     // MARK: - Balance Helpers
@@ -534,6 +671,13 @@ class ZanoCore {
     }
 
     // MARK: - Internal Types
+
+    struct SendResult {
+        let txHash: String
+        let assetId: String
+        let amount: UInt64
+        let address: String
+    }
 
     struct Asset: Equatable {
         let assetId: String
