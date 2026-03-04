@@ -10,6 +10,7 @@
 namespace plain_wallet
 {
   typedef int64_t hwallet;
+  void deinit();
   std::string init(const std::string& address, const std::string& working_dir, int log_level);
   std::string init(const std::string& ip, const std::string& port, const std::string& working_dir, int log_level);
   std::string reset();

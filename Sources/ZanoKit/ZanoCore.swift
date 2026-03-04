@@ -81,21 +81,7 @@ class ZanoCore {
         self.zanoCoreLogLevel = zanoCoreLogLevel ?? 0
         api = ZanoWalletAPI(logger: logger)
 
-        // Calculate restore height based on wallet type
-        let restoreHeight: UInt64
-        switch wallet {
-        case let .bip39(_, _, creationTimestamp):
-            restoreHeight = UInt64(RestoreHeight.getHeight(timestamp: creationTimestamp))
-        case let .legacy(seed, _):
-            // Timestamp word is at index 24 for both:
-            // - 25 words: 24 seed words + 1 timestamp word
-            // - 26 words: 24 seed words + 1 timestamp word + 1 checksum word
-            let timestampWord = seed.count >= 25 ? seed[24] : ""
-            let timestamp = api.getTimestampFromWord(timestampWord)
-            restoreHeight = UInt64(RestoreHeight.getHeight(timestamp: timestamp))
-        }
-
-        stateManager = SyncStateManager(api: api, logger: logger, restoreHeight: restoreHeight, reachabilityManager: reachabilityManager)
+        stateManager = SyncStateManager(api: api, logger: logger, restoreHeight: wallet.restoreHeight, reachabilityManager: reachabilityManager)
 
         stateManager.onSyncStateChanged = { [weak self] in
             self?.onSyncStateChanged()
@@ -131,6 +117,7 @@ class ZanoCore {
         let resultJson: String?
 
         if walletExists {
+            logger?.debug("wallet exists at path \(walletPath), opening")
             resultJson = api.openWallet(path: walletPath, password: walletPassword)
         } else {
             logger?.debug("Restoring wallet to: \(walletPath)")
@@ -140,9 +127,8 @@ class ZanoCore {
                 resultJson = try restoreFromBip39(words: words, passphrase: passphrase, creationTimestamp: creationTimestamp)
 
             case let .legacy(words, passphrase):
-                let seed = words.joined(separator: " ")
                 resultJson = api.restoreWallet(
-                    seed: seed,
+                    seed: words.joined(separator: " "),
                     path: walletPath,
                     password: walletPassword,
                     passphrase: passphrase,
@@ -173,6 +159,20 @@ class ZanoCore {
 
         guard let walletIdValue = result["wallet_id"] as? Int64 else {
             throw ZanoCoreError.walletRecoveryFailed("No wallet_id in response")
+        }
+
+        if walletExists, let seed = result["seed"] as? String {
+            let legacyWallet = ZanoWallet.legacy(
+                seed: seed.split(separator: " ").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) },
+                passphrase: ""
+            )
+            let storedRestoreHeight = legacyWallet.restoreHeight
+            let currentRestoreHeight = wallet.restoreHeight
+
+            if storedRestoreHeight != currentRestoreHeight {
+                _ = api.closeWallet(walletId: walletIdValue)
+                throw ZanoCoreError.restoreHeightDontMatch
+            }
         }
 
         walletId = walletIdValue
@@ -574,6 +574,10 @@ class ZanoCore {
     }
 
     // MARK: - Public Methods
+
+    func setConnectingState(waiting: Bool) {
+        stateManager.state = .connecting(waiting: waiting)
+    }
 
     func start() throws {
         try initializeLibrary()

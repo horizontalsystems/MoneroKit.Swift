@@ -10,4 +10,21 @@ public enum ZanoWallet {
             self = .legacy(seed: [], passphrase: "")
         }
     }
+
+    var restoreHeight: UInt64 {
+        // Calculate restore height based on wallet type
+        let creationTimestamp: UInt64
+        switch self {
+            case let .bip39(_, _, ts):
+                creationTimestamp = ts
+            case let .legacy(seed, _):
+                // Timestamp word is at index 24 for both:
+                // - 25 words: 24 seed words + 1 timestamp word
+                // - 26 words: 24 seed words + 1 timestamp word + 1 checksum word
+                let timestampWord = seed.count >= 25 ? seed[24] : ""
+                creationTimestamp = ZanoWalletAPI.getTimestampFromWord(timestampWord)
+        }
+
+        return UInt64(RestoreHeight.getHeight(timestamp: creationTimestamp))
+    }
 }

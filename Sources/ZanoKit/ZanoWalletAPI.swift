@@ -160,6 +160,9 @@ class ZanoWalletAPI {
         let result = stringFromCString(ZANO_PlainWallet_closeWallet(walletId))
 
         logResponse("ZANO_PlainWallet_closeWallet", response: result)
+
+        ZANO_PlainWallet_deinit()
+
         return result
     }
 
@@ -195,16 +198,13 @@ class ZanoWalletAPI {
     // MARK: - Timestamp from Seed Word
 
     /// Get timestamp embedded in the last word of a legacy Zano seed
-    func getTimestampFromWord(_ word: String) -> UInt64 {
-        logRequest("ZANO_getTimestampFromWord", params: "{\"word\": \"\(word)\"}")
-
+    static func getTimestampFromWord(_ word: String) -> UInt64 {
         var passwordUsed = false
         let timestamp = ZANO_getTimestampFromWord(
             (word as NSString).utf8String,
             &passwordUsed
         )
 
-        logResponse("ZANO_getTimestampFromWord", response: "{\"timestamp\": \(timestamp), \"password_used\": \(passwordUsed)}")
         return timestamp
     }
 }

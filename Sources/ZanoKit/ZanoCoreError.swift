@@ -8,6 +8,7 @@ public enum ZanoCoreError: Error {
     case transactionEstimationFailed(String)
     case transactionSendFailed(String)
     case transactionCommitFailed(String)
+    case restoreHeightDontMatch
 
     static func match(_ errorStr: String) -> ZanoCoreError? {
         let pattern = #"^not enough money to transfer, overall balance only (\d+\.\d+), sent amount \d+\.\d+$"#

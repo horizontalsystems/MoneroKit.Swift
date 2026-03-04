@@ -205,4 +205,14 @@ class GrdbStorage {
             try BlockHeights.fetchOne(db)
         }
     }
+
+    func clearStorage() {
+        try! dbPool.write { db in
+            try Asset.deleteAll(db)
+            try Balance.deleteAll(db)
+            try Transaction.deleteAll(db)
+            try BlockHeights.deleteAll(db)
+            try SentTransfer.deleteAll(db)
+        }
+    }
 }

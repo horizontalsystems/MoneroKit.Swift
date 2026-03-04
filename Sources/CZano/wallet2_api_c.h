@@ -24,6 +24,7 @@ extern "C"
 #endif
 
 
+extern ADDAPI void ZANO_PlainWallet_deinit();
 extern ADDAPI const char* ZANO_PlainWallet_init(const char* address, const char* working_dir, int log_level);
 extern ADDAPI const char* ZANO_PlainWallet_init2(const char* ip, const char* port, const char* working_dir, int log_level);
 extern ADDAPI const char* ZANO_PlainWallet_reset();

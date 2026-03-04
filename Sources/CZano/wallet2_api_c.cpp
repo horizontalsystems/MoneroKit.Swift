@@ -16,6 +16,11 @@ extern "C"
 // namespace plain_wallet
 // {
 //   typedef int64_t hwallet;
+void ZANO_PlainWallet_deinit() {
+    DEBUG_START()
+    plain_wallet::deinit();
+    DEBUG_END()
+}
 //   std::string init(const std::string& address, const std::string& working_dir, int log_level);
 const char* ZANO_PlainWallet_init(const char* address, const char* working_dir, int log_level) {
     DEBUG_START()

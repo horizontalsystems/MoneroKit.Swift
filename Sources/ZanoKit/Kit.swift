@@ -8,6 +8,7 @@ public class Kit {
     private let storage: GrdbStorage
     private let kitId = UUID().uuidString
     private let lifecycleQueue = DispatchQueue(label: "io.horizontalsystems.zano_kit.kit_lifecycle_queue", qos: .background)
+    private let walletDirectoryName: String
     private var started = false
 
     public weak var delegate: ZanoKitDelegate?
@@ -19,7 +20,7 @@ public class Kit {
         let databasePath = baseDirectoryUrl.appendingPathComponent("storage").path
         storage = GrdbStorage(databaseFilePath: databasePath)
 
-        let walletDirectoryName = "\(baseDirectoryName)/zano_core"
+        walletDirectoryName = "\(baseDirectoryName)/zano_core"
         let walletDirectoryUrl = try FileHandler.directoryURL(for: walletDirectoryName)
         let walletPath = walletDirectoryUrl.appendingPathComponent("wallet").path
         let workingDir = walletDirectoryUrl.path
@@ -125,19 +126,42 @@ public class Kit {
 
     private func _start() {
         guard !started else { return }
+        started = true
 
-        do {
-            try zanoCore.start()
-            started = true
-        } catch {
-            // Handle error
+        var kitState = KitManager.shared.checkAndGetInitialState(kitId: kitId)
+
+        while kitState == .waiting {
+            zanoCore.setConnectingState(waiting: true)
+            Thread.sleep(forTimeInterval: 1.0)
+            kitState = KitManager.shared.checkAndGetState(kitId: kitId)
+        }
+
+        if kitState == .running {
+            zanoCore.setConnectingState(waiting: false)
+            do {
+                try zanoCore.start()
+            } catch {
+                if let coreError = error as? ZanoCoreError, case .restoreHeightDontMatch = coreError {
+                    do {
+                        try FileHandler.remove(for: walletDirectoryName)
+                        _ = try FileHandler.directoryURL(for: walletDirectoryName)
+                        storage.clearStorage()
+                        zanoCore.sentTransfersMap = [:]
+                        try zanoCore.start()
+                    } catch {
+                        print(error)
+                    }
+                }
+            }
         }
     }
 
     private func _stop() {
         guard started else { return }
-        zanoCore.stop()
         started = false
+
+        zanoCore.stop()
+        KitManager.shared.removeRunning(kitId: kitId)
     }
 
     private func _restart() {
