@@ -81,6 +81,15 @@ class GrdbStorage {
             }
         }
 
+        migrator.registerMigration("createWalletInfo") { db in
+            try db.create(table: WalletInfo.databaseTableName) { t in
+                t.column(WalletInfo.Columns.id.name, .text).notNull()
+                t.column(WalletInfo.Columns.creationTimestampText.name, .text).notNull()
+
+                t.primaryKey([WalletInfo.Columns.id.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 
@@ -213,6 +222,22 @@ class GrdbStorage {
             try Transaction.deleteAll(db)
             try BlockHeights.deleteAll(db)
             try SentTransfer.deleteAll(db)
+            try WalletInfo.deleteAll(db)
+        }
+    }
+
+    // MARK: - Wallet Info
+
+    func saveCreationTimestamp(_ timestamp: UInt64) {
+        try! dbPool.write { db in
+            let info = WalletInfo(creationTimestamp: timestamp)
+            try info.save(db)
+        }
+    }
+
+    func getCreationTimestamp() -> UInt64? {
+        try! dbPool.read { db in
+            try WalletInfo.fetchOne(db)?.creationTimestamp
         }
     }
 }

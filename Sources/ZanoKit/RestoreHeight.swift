@@ -104,6 +104,7 @@ public class RestoreHeight {
         // 2026
         "2026-01-01": 3_491_296,
         "2026-02-01": 3_536_021,
+        "2026-03-01": 3_576_257,
     ]
 
     public static func getHeight(date: Date) -> Int64 {
@@ -192,13 +193,8 @@ public class RestoreHeight {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = utcTimeZone
 
-        // Subtract 2 days for safety margin
-        guard let adjustedDate = calendar.date(byAdding: .day, value: -2, to: date) else {
-            return 0
-        }
-
-        let year = calendar.component(.year, from: adjustedDate)
-        let month = calendar.component(.month, from: adjustedDate)
+        let year = calendar.component(.year, from: date)
+        let month = calendar.component(.month, from: date)
 
         // Check if before May 2019 (Zano genesis)
         if year < 2019 {
@@ -208,7 +204,7 @@ public class RestoreHeight {
             return 0
         }
 
-        let query = adjustedDate
+        let query = date
 
         // Date formatter for UTC
         let formatter = DateFormatter()
@@ -218,7 +214,7 @@ public class RestoreHeight {
         let queryDate = formatter.string(from: date)
 
         // Get first day of the month
-        let firstOfMonth = calendar.dateInterval(of: .month, for: adjustedDate)!.start
+        let firstOfMonth = calendar.dateInterval(of: .month, for: date)!.start
         let prevDate = formatter.string(from: firstOfMonth)
 
         // Lookup blockheight at first of the month

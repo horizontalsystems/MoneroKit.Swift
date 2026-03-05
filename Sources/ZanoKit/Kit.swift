@@ -36,7 +36,11 @@ public class Kit {
             networkType: networkType,
             reachabilityManager: reachabilityManager,
             logger: logger,
-            zanoCoreLogLevel: zanoCoreLogLevel
+            zanoCoreLogLevel: zanoCoreLogLevel,
+            storedCreationTimestamp: storage.getCreationTimestamp(),
+            onFirstRestore: { [weak storage] timestamp in
+                storage?.saveCreationTimestamp(timestamp)
+            }
         )
 
         // Restore in-memory sent transfer map from persisted GRDB records
