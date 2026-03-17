@@ -621,6 +621,29 @@ class ZanoCore {
         return api.isValidAddress(address)
     }
 
+    static func address(wallet: ZanoWallet) throws -> String {
+        switch wallet {
+        case let .legacy(words, passphrase):
+            guard let address = ZanoWalletAPI.generateAddress(
+                seed: words.joined(separator: " "),
+                seedPassword: passphrase
+            ) else {
+                throw ZanoKitError.invalidSeed
+            }
+            return address
+
+        case let .bip39(words, passphrase, _):
+            let hex = try secretDerivationFromBip39(mnemonic: words, passphrase: passphrase)
+            guard let address = ZanoWalletAPI.generateAddress(
+                secretDerivationHex: hex,
+                isAuditable: false
+            ) else {
+                throw ZanoKitError.invalidSeed
+            }
+            return address
+        }
+    }
+
     // MARK: - Internal Types
 
     struct SendResult {

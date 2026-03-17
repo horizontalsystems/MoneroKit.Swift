@@ -68,8 +68,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "MoneroBinary",
-            url: "https://github.com/horizontalsystems/MoneroKit.Swift/releases/download/frameworks-1/MoneroZano.xcframework.zip",
-            checksum: "bd0e4d6af735b25ae0d0e8c48b3cf63a7a70659b08fe936b257d116793f77680"
+            url: "https://github.com/horizontalsystems/MoneroKit.Swift/releases/download/frameworks-2/MoneroZano.xcframework.zip",
+            checksum: "b28641ef533b79775065cae87ea8a8d3d43fe78753b5890f727fa7161bccd685"
         ),
     ],
     cxxLanguageStandard: .cxx11

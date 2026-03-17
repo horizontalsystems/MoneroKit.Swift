@@ -333,6 +333,26 @@ uint64_t ZANO_getTimestampFromWord(const char* word, bool* password_used) {
     DEBUG_END()
 }
 
+const char* ZANO_generateAddress(const char* seed, const char* seed_password) {
+    DEBUG_START()
+    std::string str = plain_wallet::generate_address(std::string(seed ? seed : ""), std::string(seed_password ? seed_password : ""));
+    const std::string::size_type size = str.size();
+    char *buffer = new char[size + 1];
+    memcpy(buffer, str.c_str(), size + 1);
+    return buffer;
+    DEBUG_END()
+}
+
+const char* ZANO_generateAddressFromDerivation(const char* secret_derivation_hex, bool is_auditable) {
+    DEBUG_START()
+    std::string str = plain_wallet::generate_address_from_derivation(std::string(secret_derivation_hex ? secret_derivation_hex : ""), is_auditable);
+    const std::string::size_type size = str.size();
+    char *buffer = new char[size + 1];
+    memcpy(buffer, str.c_str(), size + 1);
+    return buffer;
+    DEBUG_END()
+}
+
 
 #ifdef __cplusplus
 }

@@ -207,6 +207,26 @@ class ZanoWalletAPI {
 
         return timestamp
     }
+
+    // MARK: - Address Generation
+
+    /// Derive a Zano address from a legacy seed phrase (25 or 26 words)
+    static func generateAddress(seed: String, seedPassword: String) -> String? {
+        let result = stringFromCString(ZANO_generateAddress(
+            (seed as NSString).utf8String,
+            (seedPassword as NSString).utf8String
+        ))
+        return result.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Derive a Zano address from a 32-byte secret derivation hex (BIP39 path)
+    static func generateAddress(secretDerivationHex: String, isAuditable: Bool) -> String? {
+        let result = stringFromCString(ZANO_generateAddressFromDerivation(
+            (secretDerivationHex as NSString).utf8String,
+            isAuditable
+        ))
+        return result.flatMap { $0.isEmpty ? nil : $0 }
+    }
 }
 
 // MARK: - Response Parsing Helpers

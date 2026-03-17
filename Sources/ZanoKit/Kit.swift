@@ -310,6 +310,10 @@ public extension Kit {
     static func isValid(address: String, networkType _: NetworkType) -> Bool {
         ZanoCore.isValid(address: address)
     }
+
+    static func address(wallet: ZanoWallet) throws -> String {
+        try ZanoCore.address(wallet: wallet)
+    }
 }
 
 // MARK: - Errors
