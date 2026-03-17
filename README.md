@@ -1,3 +1,5 @@
-# MoneroKit.Swift
+# 'frameworks' branch is for 'MoneroZano.xcframework' releases on github
 
-`MoneroKit.Swift` is a package that integrates monero to Unstoppable Wallet
+## frameworks-1
+## frameworks-2
+
