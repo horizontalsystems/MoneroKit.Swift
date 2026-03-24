@@ -31,22 +31,64 @@ class ZanoWalletAPI {
     // MARK: - Library Initialization
 
     func initLibrary(daemonAddress: String, workingDir: String, logLevel: Int32) -> String? {
-        logRequest("ZANO_PlainWallet_init", params: """
+        // Split into host (preserving schema) and port separately so the C++ library
+        // stores "https://host:port" as m_daemon_address, enabling SSL in check_connection().
+        // This mirrors how react-native-zano calls ZANO_PlainWallet_init2.
+        let (host, port) = ZanoWalletAPI.parseAddress(daemonAddress)
+
+        logRequest("ZANO_PlainWallet_init2", params: """
         {
-            "daemon_address": "\(daemonAddress)",
+            "host": "\(host)",
+            "port": "\(port)",
             "working_dir": "\(workingDir)",
             "log_level": \(logLevel)
         }
         """)
 
-        let result = stringFromCString(ZANO_PlainWallet_init(
-            (daemonAddress as NSString).utf8String,
+        let result = stringFromCString(ZANO_PlainWallet_init2(
+            (host as NSString).utf8String,
+            (port as NSString).utf8String,
             (workingDir as NSString).utf8String,
             logLevel
         ))
 
-        logResponse("ZANO_PlainWallet_init", response: result)
+        logResponse("ZANO_PlainWallet_init2", response: result)
         return result
+    }
+
+    /// Parse a daemon address into (schemaAndHost, port).
+    ///
+    /// Keeps the schema in the host string so the C++ library stores
+    /// "https://host:port" as m_daemon_address, which causes check_connection()
+    /// to enable SSL. This mirrors how react-native-zano calls ZANO_PlainWallet_init2.
+    ///
+    ///   "https://node.zano.org:443"  → ("https://node.zano.org", "443")
+    ///   "https://node.zano.org"      → ("https://node.zano.org", "443")
+    ///   "http://node.zano.org:8081"  → ("http://node.zano.org", "8081")
+    static func parseAddress(_ address: String) -> (host: String, port: String) {
+        for schema in ["https://", "http://"] {
+            if address.hasPrefix(schema) {
+                let afterSchema = String(address.dropFirst(schema.count))
+                // Strip any path component, keep only authority (host[:port])
+                let authority = afterSchema.components(separatedBy: "/").first ?? afterSchema
+                if let colonIdx = authority.lastIndex(of: ":") {
+                    let portStr = String(authority[authority.index(after: colonIdx)...])
+                    let hostOnly = String(authority[..<colonIdx])
+                    if !portStr.isEmpty {
+                        return (schema + hostOnly, portStr)
+                    }
+                }
+                let defaultPort = schema.hasPrefix("https") ? "443" : "80"
+                return (schema + authority, defaultPort)
+            }
+        }
+        // No schema: split on last ":"
+        if let colonIdx = address.lastIndex(of: ":") {
+            let host = String(address[..<colonIdx])
+            let port = String(address[address.index(after: colonIdx)...])
+            if !host.isEmpty && !port.isEmpty { return (host, port) }
+        }
+        return (address, "8081")
     }
 
     // MARK: - Wallet Existence Check

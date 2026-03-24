@@ -103,6 +103,8 @@ class ZanoCore {
                 delegate?.walletStateDidChange(state: state)
             }
         }
+
+        walletAddress = (try? Self.address(wallet: wallet)) ?? ""
     }
 
     deinit {
