@@ -105,6 +105,7 @@ public class RestoreHeight {
         "2026-01-01": 3_491_296,
         "2026-02-01": 3_536_021,
         "2026-03-01": 3_576_257,
+        "2026-04-01": 3_620_877,
     ]
 
     public static func getHeight(date: Date) -> Int64 {
