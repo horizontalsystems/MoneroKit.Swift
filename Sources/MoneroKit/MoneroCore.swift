@@ -357,7 +357,13 @@ class MoneroCore {
         }
 
         guard let wmp = walletManagerPointer, let wp else { return }
-        MONERO_WalletManager_closeWallet(wmp, wp, true)
+        // Store wallet before closing. MONERO_Wallet_store routes through
+        // WalletImpl::store() which acquires LOCK_REFRESH(), ensuring the
+        // C++ refresh thread has stopped before serializing. Calling
+        // closeWallet with store=true would bypass this lock and race with
+        // the refresh thread, crashing in wallet2::get_cache_file_data().
+        _ = MONERO_Wallet_store(wp, cWalletPath)
+        MONERO_WalletManager_closeWallet(wmp, wp, false)
     }
 
     private func startWalletServices() {
