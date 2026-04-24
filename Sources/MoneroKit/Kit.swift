@@ -223,6 +223,7 @@ public class Kit {
     }
 
     public func start() {
+        moneroCore.setConnectingState(waiting: false)
         lifecycleQueue.async { [weak self] in self?._start() }
     }
 

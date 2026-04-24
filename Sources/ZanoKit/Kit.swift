@@ -174,6 +174,7 @@ public class Kit {
     }
 
     public func start() {
+        zanoCore.setConnectingState(waiting: false)
         lifecycleQueue.async { [weak self] in
             self?._start()
         }
