@@ -7,7 +7,7 @@ class WalletInfo: Record {
     var creationTimestampText: String
 
     init(creationTimestamp: UInt64) {
-        self.creationTimestampText = String(creationTimestamp)
+        creationTimestampText = String(creationTimestamp)
         super.init()
     }
 
