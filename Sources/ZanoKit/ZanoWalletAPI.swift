@@ -86,7 +86,7 @@ class ZanoWalletAPI {
         if let colonIdx = address.lastIndex(of: ":") {
             let host = String(address[..<colonIdx])
             let port = String(address[address.index(after: colonIdx)...])
-            if !host.isEmpty && !port.isEmpty { return (host, port) }
+            if !host.isEmpty, !port.isEmpty { return (host, port) }
         }
         return (address, "8081")
     }

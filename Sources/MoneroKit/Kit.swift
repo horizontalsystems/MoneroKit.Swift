@@ -249,7 +249,7 @@ public class Kit {
         lifecycleQueue.async { [weak self] in self?._restart() }
     }
 
-    public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws {
+    @discardableResult public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws -> [String] {
         let result = try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo)
 
         for (index, txHash) in result.txHashes.enumerated() {
@@ -258,6 +258,8 @@ public class Kit {
                 storage.savePrivateTxData(privateTxData)
             }
         }
+
+        return result.txHashes
     }
 
     public func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {

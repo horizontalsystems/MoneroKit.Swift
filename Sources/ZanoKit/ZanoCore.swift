@@ -478,7 +478,8 @@ class ZanoCore {
                     for (assetId, amounts) in receivedByAsset {
                         let totalReceived = amounts.reduce(0, +)
                         if let totalSpent = totalSpentByAsset[assetId], totalReceived > 0,
-                           (assetId == ZanoAssetId) ? totalReceived + fee == totalSpent : totalReceived == totalSpent {
+                           (assetId == ZanoAssetId) ? totalReceived + fee == totalSpent : totalReceived == totalSpent
+                        {
                             let sentAmount: UInt64
                             if let sentInfo = sentTransfersMap[txHash], sentInfo.assetId == assetId {
                                 sentAmount = sentInfo.amount
