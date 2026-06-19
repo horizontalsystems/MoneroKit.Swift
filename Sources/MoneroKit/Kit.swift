@@ -110,7 +110,16 @@ public class Kit {
     }
 
     deinit {
-        _stop()
+        let moneroCore = moneroCore
+        let kitId = kitId
+        let started = started
+
+        lifecycleQueue.async {
+            guard started else { return }
+
+            moneroCore.stop()
+            KitManager.shared.removeRunning(kitId: kitId)
+        }
     }
 
     // Methods interacting with wallet cache in storage
