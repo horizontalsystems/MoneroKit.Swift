@@ -197,7 +197,13 @@ public class Kit {
     }
 
     public func refresh() {
-        zanoCore.refresh()
+        lifecycleQueue.async { [weak self] in
+            guard let self,
+                  started,
+                  KitManager.shared.isRunning(kitId: kitId) else { return }
+
+            zanoCore.refresh()
+        }
     }
 
     public func restart() {

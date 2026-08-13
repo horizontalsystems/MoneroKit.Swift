@@ -227,6 +227,20 @@ class SyncStateManager {
         walletId = nil
     }
 
+    /// stop() plus a wait for any in-flight poll tick to leave the C API, with the
+    /// cleared state published on the poll queue so later timer fires observe it.
+    /// Must not be called from the poll queue itself; call sites run on the kit
+    /// lifecycle queue, right before the wallet is closed and the library deinited.
+    func stopAndDrain() {
+        isRunning = false
+        queue.sync { [weak self] in
+            guard let self else { return }
+            isRunning = false
+            connectStartTime = nil
+            walletId = nil
+        }
+    }
+
     func walletStored() {
         // Called from walletQueue; hop onto the state queue so lastStoredBlockHeight is only
         // ever touched where checkSyncState reads it.

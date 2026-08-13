@@ -92,9 +92,7 @@ class ZanoCore {
         }
 
         stateManager.onSyncedPoll = { [weak self] in
-            self?.walletQueue.async {
-                self?.refresh()
-            }
+            self?.refresh() // refresh() dispatches onto walletQueue itself
         }
 
         stateManager.onBlockHeightsChanged = { [weak self] _, _ in
@@ -289,14 +287,14 @@ class ZanoCore {
 
         case .synced:
             walletQueue.async { [weak self] in
-                self?.refresh()
+                self?._refresh()
                 self?.storeWallet()
             }
 
         case .syncing:
             if stateManager.chunkOfBlocksSynced {
                 walletQueue.async { [weak self] in
-                    self?.refresh()
+                    self?._refresh()
                     self?.storeWallet()
                     // Advance the checkpoint on every attempt, not only on a successful store.
                     // Gating it on success sounds safer but latches chunkOfBlocksSynced true
@@ -628,14 +626,31 @@ class ZanoCore {
     }
 
     func stop() {
-        stopWalletServices()
+        // Wait for any in-flight state poll to leave the C API before tearing the
+        // library down; the flag-based stop alone cannot guarantee that, and
+        // closeWallet ends in ZANO_PlainWallet_deinit, which destroys the wallets
+        // manager under any call still executing inside it.
+        stateManager.stopAndDrain()
 
-        guard let wid = walletId else { return }
+        // Take the wallet id on the wallet queue: refreshes queued after this see
+        // nil and skip, and an in-flight refresh completes before we close.
+        let wid: Int64? = walletQueue.sync {
+            let wid = walletId
+            walletId = nil
+            return wid
+        }
+
+        guard let wid else { return }
         _ = api.closeWallet(walletId: wid)
-        walletId = nil
     }
 
     func refresh() {
+        walletQueue.async { [weak self] in
+            self?._refresh()
+        }
+    }
+
+    private func _refresh() {
         updateBalance()
         fetchTransactions()
     }
