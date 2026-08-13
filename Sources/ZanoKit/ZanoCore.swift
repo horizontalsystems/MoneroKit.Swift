@@ -298,6 +298,14 @@ class ZanoCore {
                 walletQueue.async { [weak self] in
                     self?.refresh()
                     self?.storeWallet()
+                    // Advance the checkpoint on every attempt, not only on a successful store.
+                    // Gating it on success sounds safer but latches chunkOfBlocksSynced true
+                    // whenever a store keeps failing, and during .syncing the state changes on
+                    // nearly every 5s poll — so each poll would re-run getbalance plus a full
+                    // get_recent_txs_and_info(count: 1000) and delete-all/reinsert, with no
+                    // backoff, indefinitely. Nothing is persisted during a long refresh either
+                    // way (the core BUSY-rejects the store), so gating buys no durability; it
+                    // only trades a bounded 2000-block retry for an unbounded hot loop.
                     self?.stateManager.walletStored()
                 }
             }
@@ -311,15 +319,24 @@ class ZanoCore {
         }
     }
 
+    /// Best effort: the core rejects the store with BUSY during a long refresh, so a call is
+    /// not a guaranteed checkpoint.
     private func storeWallet() {
         guard let wid = walletId else { return }
-        _ = api.invoke(walletId: wid, method: "store")
+
+        let (_, error) = api.parseResponse(api.invoke(walletId: wid, method: "store"))
+        if let error {
+            logger?.debug("Store wallet failed: \(error.code) - \(error.message)")
+        }
     }
 
     func updateBalance() {
         guard let wid = walletId else { return }
 
-        // Skip if wallet is busy with long refresh
+        // The core rejects every wallet JSON-RPC with BUSY while a long refresh is in progress,
+        // so this call cannot succeed — skip it rather than spend a round trip. SyncStateManager
+        // fires a refresh on the falling edge of isInLongRefresh, which is the first moment the
+        // balance is actually readable.
         if stateManager.isInLongRefresh {
             return
         }
@@ -337,7 +354,7 @@ class ZanoCore {
     func fetchTransactions() {
         guard let wid = walletId else { return }
 
-        // Skip fetching if wallet is busy with long refresh
+        // Same BUSY rejection as updateBalance() — see the comment there.
         if stateManager.isInLongRefresh {
             logger?.debug("Skipping fetch transactions - wallet is in long refresh")
             return
@@ -390,13 +407,67 @@ class ZanoCore {
                 // Track how many records this transaction contributes (used below for self-send synthesis)
                 var txRecordsCreated = 0
 
-                // Parse subtransfers for multi-asset support
-                if let subtransfers = tx["subtransfers"] as? [[String: Any]], !subtransfers.isEmpty {
-                    for subtransfer in subtransfers {
-                        let assetId = subtransfer["asset_id"] as? String ?? ZanoAssetId
-                        let amount = (subtransfer["amount"] as? NSNumber)?.uint64Value ?? 0
-                        // Each subtransfer can have its own is_income flag
-                        let subtransferIsIncome = subtransfer["is_income"] as? Bool ?? isIncome
+                // Parse subtransfers for multi-asset support.
+                //
+                // The core groups amounts by payment id first and by asset second, so they arrive
+                // as subtransfers_by_pid[].subtransfers[]. wallet_transfer_info carries no flat
+                // "subtransfers", "amount" or "is_income" at all (see its KV_SERIALIZE map in
+                // wallet_public_structs_defs.h), so reading tx["subtransfers"] always missed and
+                // every transfer fell through to the fallback below — which hardcodes the native
+                // asset id, making FUSD and every other asset invisible in history.
+                //
+                // Payment ids are flattened away here because Transaction has nowhere to put one;
+                // the amounts, which are what history renders, are identical either way.
+                var subtransfers: [[String: Any]] = []
+                if let byPid = tx["subtransfers_by_pid"] as? [[String: Any]] {
+                    for group in byPid {
+                        if let subs = group["subtransfers"] as? [[String: Any]] {
+                            subtransfers.append(contentsOf: subs)
+                        }
+                    }
+                } else if let flat = tx["subtransfers"] as? [[String: Any]] {
+                    // Older cores served a flat list; keep reading it so a downgrade still works.
+                    subtransfers = flat
+                }
+
+                // Merge legs by asset, netting opposing directions, before creating records.
+                // Transaction's primary key is (hash, assetId), so the same asset appearing
+                // twice — under two payment ids, or as an income/outgoing pair — would produce
+                // two records with the same key: the delegate would show both while the storage
+                // layer's onConflict .replace kept only the last, under-reporting history and
+                // diverging from the in-memory list after a restart. Signed, clamped arithmetic
+                // throughout: amounts are daemon-supplied and anyone can issue an asset, so an
+                // oversized value must not trap the sync poll. Counts here are tiny, so the
+                // linear lookup is cheaper than building a dictionary and re-sorting.
+                var legs: [(assetId: String, amount: Int64)] = []
+                for subtransfer in subtransfers {
+                    let assetId = subtransfer["asset_id"] as? String ?? ZanoAssetId
+                    let amount = Int64(clamping: (subtransfer["amount"] as? NSNumber)?.uint64Value ?? 0)
+                    // Each subtransfer can have its own is_income flag
+                    let legIsIncome = subtransfer["is_income"] as? Bool ?? isIncome
+                    let signedAmount = legIsIncome ? amount : -amount
+
+                    if let idx = legs.firstIndex(where: { $0.assetId == assetId }) {
+                        let (sum, overflow) = legs[idx].amount.addingReportingOverflow(signedAmount)
+                        legs[idx].amount = overflow ? (signedAmount > 0 ? .max : .min) : sum
+                    } else {
+                        legs.append((assetId, signedAmount))
+                    }
+                }
+
+                if !legs.isEmpty {
+                    for leg in legs {
+                        let assetId = leg.assetId
+                        let subtransferIsIncome = leg.amount > 0
+
+                        // A zero net means everything that left came back to this wallet; drop
+                        // the leg so txRecordsCreated stays 0 and the employed_entries self-send
+                        // synthesis below can classify the transaction.
+                        if leg.amount == 0 {
+                            continue
+                        }
+
+                        let amount = leg.amount.magnitude
 
                         // Skip fee subtransfer — the ZANO fee always appears as an outgoing subtransfer
                         // equal to the fee amount. We skip it since fee is tracked in the fee field.
@@ -410,11 +481,16 @@ class ZanoCore {
 
                         // For regular outgoing native ZANO, subtract fee to get the net sent amount.
                         // For all other cases use the amount as-is.
+                        //
+                        // Clamped Int64 math: an outgoing native leg smaller than the fee, or an
+                        // amount above Int64.max, must not trap and crash the sync poll on
+                        // walletQueue. Only the fee-inclusive leg should exceed the fee, but
+                        // malformed or unexpected groupings must not be fatal.
                         let storedAmount: Int64
                         if !subtransferIsIncome, assetId == ZanoAssetId {
-                            storedAmount = Int64(amount - fee)
+                            storedAmount = Int64(clamping: amount) - Int64(clamping: fee)
                         } else {
-                            storedAmount = Int64(amount)
+                            storedAmount = Int64(clamping: amount)
                         }
 
                         fetchedTransactions.append(Transaction(
@@ -432,7 +508,14 @@ class ZanoCore {
                         ))
                         txRecordsCreated += 1
                     }
-                } else {
+                } else if tx["subtransfers_by_pid"] == nil, tx["subtransfers"] == nil {
+                    // Legacy shape only. Guarded on the keys being absent rather than on the
+                    // flattened list being empty: a transfer that carries subtransfers_by_pid but
+                    // yields no legs (empty array, or groups without the inner key) would
+                    // otherwise land here and read tx["amount"]/tx["is_income"], which this core
+                    // never serializes — fabricating a phantom outgoing record of -fee and, via
+                    // txRecordsCreated, suppressing the employed_entries self-send synthesis that
+                    // should handle exactly that case.
                     let type: TransactionType = isIncome ? .incoming : .outgoing
                     let amount = (tx["amount"] as? NSNumber)?.int64Value ?? 0
                     let storedAmount: Int64 = isIncome ? abs(amount) : abs(amount) - Int64(fee)
@@ -451,6 +534,14 @@ class ZanoCore {
                         recipientAddress: remoteAddress
                     ))
                     txRecordsCreated += 1
+                }
+
+                // A structured transfer can still yield zero records (empty by-pid groups, or
+                // every leg netted or fee-skipped away). Outgoing ones are rescued by the
+                // employed_entries synthesis below; an incoming one has no rescue and would
+                // silently vanish from history, so leave a trace.
+                if txRecordsCreated == 0, isIncome {
+                    logger?.warning("Incoming transfer \(txHash) yielded no history records (no usable subtransfer legs)")
                 }
 
                 // Detect self-sends where remote_addresses is absent and sentTransfers is empty

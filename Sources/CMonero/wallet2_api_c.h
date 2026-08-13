@@ -1051,6 +1051,12 @@ extern ADDAPI const char* MONERO_checksum_wallet2_api_c_h();
 extern ADDAPI const char* MONERO_checksum_wallet2_api_c_cpp();
 extern ADDAPI const char* MONERO_checksum_wallet2_api_c_exp();
 
+// Monero core version compiled into the prebuilt library (monero src/version.cpp.in ->
+// libversion.a), e.g. "0.18.5.1-c1b843525". Returns a pointer to a static string owned by
+// the library - do NOT MONERO_free() it.
+extern ADDAPI const char* MONERO_VERSION_getFull();
+extern ADDAPI const char* MONERO_VERSION_getShort();
+
 #ifdef __cplusplus
 }
 #endif

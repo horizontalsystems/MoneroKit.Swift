@@ -325,7 +325,9 @@ uint64_t ZANO_PlainWallet_getCurrentTxFee(uint64_t priority) {
 // }
 
 void ZANO_free(void* ptr) {
-    free(ptr);
+    // Every buffer this bridge returns is allocated with new char[]; releasing it with free()
+    // is an allocator mismatch (UB, aborts under ASan/hardened allocators).
+    delete[] static_cast<char*>(ptr);
 }
 
 const char* ZANO_checksum_wallet2_api_c_h() {

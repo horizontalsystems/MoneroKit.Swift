@@ -17,7 +17,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-MONERO_DAEMON="${MONERO_DAEMON:-http://node.sethforprivacy.com:18089}"
+MONERO_DAEMON="${MONERO_DAEMON:-http://node.xmr.rocks:18089}"
 ZANO_DAEMON="${ZANO_DAEMON:-http://37.27.100.59:10500}"
 
 # ── Dependency check ─────────────────────────────────────────────────────────

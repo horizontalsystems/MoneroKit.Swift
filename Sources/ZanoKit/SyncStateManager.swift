@@ -127,6 +127,8 @@ class SyncStateManager {
             daemonHeight = height.uint64Value
         }
         isDaemonConnected = status["is_daemon_connected"] as? Bool ?? false
+
+        let wasInLongRefresh = isInLongRefresh
         isInLongRefresh = status["is_in_long_refresh"] as? Bool ?? false
 
         if lastStoredBlockHeight < restoreHeight {
@@ -141,12 +143,54 @@ class SyncStateManager {
 
         let newState = evaluateState()
         logger?.debug("Sync: wallet=\(walletHeight), daemon=\(daemonHeight), longRefresh=\(isInLongRefresh) -> \(newState.description)")
+
+        // Captured before the state assignment: its didSet fires ZanoCore's onSyncStateChanged,
+        // which reads chunkOfBlocksSynced and enqueues walletStored() on walletQueue — by the
+        // time transitionRefreshed is evaluated below, the checkpoint may already have advanced
+        // and a second read would disagree with what ZanoCore acted on.
+        let chunkSyncedAtTransition = chunkOfBlocksSynced
+        let stateChanged = state != newState
         state = newState
 
-        // Call onSyncedPoll only when wallet height changed (new block received)
-        // Balance/transaction refresh only happens when height actually changes
+        // ZanoCore already refreshes from onSyncStateChanged: unconditionally when the state
+        // enters .synced, and when it enters .syncing at a chunk boundary. Both are common right
+        // after a long refresh ends, so dispatching again below would put a second full
+        // getbalance + get_recent_txs_and_info(count: 1000) back-to-back on the same serial
+        // queue for no new data.
+        let transitionRefreshed: Bool = {
+            guard stateChanged else { return false }
+            switch newState {
+            case .synced: return true
+            case .syncing: return chunkSyncedAtTransition
+            default: return false
+            }
+        }()
+
+        var shouldRefresh = false
+
+        // The core refuses EVERY wallet JSON-RPC while a long refresh is running
+        // (wallets_manager::invoke returns API_RETURN_CODE_BUSY when long_refresh_in_progress),
+        // so balance and transactions are unreadable for its whole duration. The instant it
+        // clears is our first — and possibly only — window: the daemon may already have advanced
+        // far enough for the worker to start another long refresh on its next pass, in which case
+        // waiting for .synced would never fire.
+        //
+        // Deliberately does not advance lastRefreshedHeight. This only enqueues work on
+        // walletQueue; by the time it runs, isInLongRefresh may have flipped back or the invoke
+        // may return BUSY, so nothing is guaranteed to have been read. Advancing here would
+        // disarm the height check below and leave balance and history stale until some later
+        // state transition.
+        if wasInLongRefresh, !isInLongRefresh {
+            shouldRefresh = true
+        }
+
+        // Otherwise refresh only when the wallet advanced, so a synced idle wallet doesn't poll.
         if case .synced = newState, walletHeight > lastRefreshedHeight {
             lastRefreshedHeight = walletHeight
+            shouldRefresh = true
+        }
+
+        if shouldRefresh, !transitionRefreshed {
             onSyncedPoll?()
         }
 
@@ -184,6 +228,11 @@ class SyncStateManager {
     }
 
     func walletStored() {
-        lastStoredBlockHeight = walletHeight
+        // Called from walletQueue; hop onto the state queue so lastStoredBlockHeight is only
+        // ever touched where checkSyncState reads it.
+        queue.async { [weak self] in
+            guard let self else { return }
+            lastStoredBlockHeight = walletHeight
+        }
     }
 }

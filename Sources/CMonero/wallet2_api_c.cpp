@@ -2706,6 +2706,20 @@ void MONERO_free(void* ptr) {
     free(ptr);
 }
 
+// Defined in monero's generated src/version.cpp, linked in via libversion.a. Declared here
+// rather than #include "version.h" because that header is generated into the monero build
+// tree and is not shipped with the prebuilt xcframework.
+extern const char* const MONERO_VERSION_FULL;
+extern const char* const MONERO_VERSION;
+
+const char* MONERO_VERSION_getFull() {
+    return MONERO_VERSION_FULL;
+}
+
+const char* MONERO_VERSION_getShort() {
+    return MONERO_VERSION;
+}
+
 #ifdef __cplusplus
 }
 #endif

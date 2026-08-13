@@ -1,3 +1,4 @@
+import CZano // for ZANO_PlainWallet_getVersion() in coreVersion
 import Foundation
 import HsToolKit
 
@@ -314,6 +315,14 @@ public extension Kit {
 
     static func address(wallet: ZanoWallet) throws -> String {
         try ZanoCore.address(wallet: wallet)
+    }
+
+    /// Zano core version compiled into the bundled xcframework, e.g. "2.2.1.505[<commit>]".
+    /// Backed by plain_wallet::get_version(), which returns a compile-time constant, so this is
+    /// safe to call before any wallet exists.
+    static var coreVersion: String {
+        // ZANO_PlainWallet_getVersion() returns a heap buffer; stringFromCString frees it.
+        stringFromCString(ZANO_PlainWallet_getVersion()) ?? "unknown"
     }
 }
 

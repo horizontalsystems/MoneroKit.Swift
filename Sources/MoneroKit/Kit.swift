@@ -1,3 +1,4 @@
+import CMonero // for MONERO_VERSION_getFull() in coreVersion
 import Combine
 import Foundation
 import HsToolKit
@@ -377,6 +378,14 @@ public extension Kit {
 
     static func address(wallet: MoneroWallet, account: UInt32, index: UInt32) throws -> String? {
         try MoneroCore.address(wallet: wallet, account: account, index: index, networkType: .mainnet)
+    }
+
+    /// Monero core version compiled into the bundled xcframework, e.g. "0.18.5.1-c1b843525".
+    /// Read from the native library itself, so it cannot drift from the binary actually in use.
+    static var coreVersion: String {
+        guard let cString = MONERO_VERSION_getFull() else { return "unknown" }
+        // Static string owned by the library - must not be freed.
+        return String(cString: cString)
     }
 }
 
