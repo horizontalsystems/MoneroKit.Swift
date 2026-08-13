@@ -7,7 +7,7 @@ class KitManager {
 
     static let shared = KitManager()
 
-    private let queue = DispatchQueue(label: "io.horizontalsystems.monero_kit.kit_manager", qos: .background)
+    private let queue = DispatchQueue(label: "io.horizontalsystems.monero_kit.kit_manager", qos: .utility)
     private var runningKitId: String?
     private var waitingKitId: String?
 
