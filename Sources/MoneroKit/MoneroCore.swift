@@ -378,6 +378,16 @@ class MoneroCore {
         walletListener.stop()
     }
 
+    // Draining variant for the paths that go on to close or store the wallet:
+    // waits until no poll/listener tick is still inside the C API. Listener first —
+    // its onNewTransaction callback can restart the state manager. Only safe from
+    // the lifecycle queue (the plain stopWalletServices is also called from the
+    // reachability .idle handler, which runs on the state queue and must not sync).
+    private func stopWalletServicesAndDrain() {
+        walletListener.stopAndDrain()
+        stateManager.stopAndDrain()
+    }
+
     func start() throws {
         guard walletManagerPointer != nil else {
             logger?.error("Error: Could not get WalletManager instance.")
@@ -390,12 +400,12 @@ class MoneroCore {
     }
 
     func stop() {
-        stopWalletServices()
+        stopWalletServicesAndDrain()
         stopCore()
     }
 
     func pause() {
-        stopWalletServices()
+        stopWalletServicesAndDrain()
 
         walletQueue.sync { [weak self] in
             guard let self, let walletPtr = walletPointer else { return }

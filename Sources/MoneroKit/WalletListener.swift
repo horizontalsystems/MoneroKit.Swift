@@ -64,6 +64,25 @@ class WalletListener {
         walletPointer = nil
     }
 
+    /// stop() plus a wait for any in-flight listener tick to finish using its
+    /// pointers, with the cleared state published on the listener queue so later
+    /// timer fires observe it. Must not be called from the listener queue itself;
+    /// call sites run on the kit lifecycle queue before the wallet is closed.
+    func stopAndDrain() {
+        isRunning = false
+        queue.sync { [weak self] in
+            guard let self else { return }
+            isRunning = false
+            onNewTransaction = nil
+            walletListenerPointer = nil
+
+            if let walletPointer {
+                MONERO_Wallet_stop(walletPointer)
+            }
+            walletPointer = nil
+        }
+    }
+
     func setLockedBalanceHeight(height: UInt64) {
         if lockedBalanceBlockHeight == nil {
             lockedBalanceBlockHeight = height
