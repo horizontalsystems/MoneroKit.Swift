@@ -53,7 +53,16 @@ public class Kit {
     }
 
     deinit {
-        _stop()
+        let zanoCore = zanoCore
+        let kitId = kitId
+        let started = started
+
+        lifecycleQueue.async {
+            guard started else { return }
+
+            zanoCore.stop()
+            KitManager.shared.removeRunning(kitId: kitId)
+        }
     }
 
     // MARK: - Public Properties
