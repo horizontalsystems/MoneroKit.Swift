@@ -8,7 +8,7 @@ public class Kit {
     private let zanoCore: ZanoCore
     private let storage: GrdbStorage
     private let kitId = UUID().uuidString
-    private let lifecycleQueue = DispatchQueue(label: "io.horizontalsystems.zano_kit.kit_lifecycle_queue", qos: .background)
+    private let lifecycleQueue = DispatchQueue(label: "io.horizontalsystems.zano_kit.kit_lifecycle_queue", qos: .utility)
     private let walletDirectoryName: String
     private var started = false
 
