@@ -81,6 +81,10 @@ class MoneroCore {
         }
 
         walletListener.onNewTransaction = { [weak self] in
+            // Refresh right away so an incoming (even unconfirmed) transaction surfaces
+            // immediately; the state poll alone only refreshes when the sync state changes,
+            // which can be a whole block time away.
+            self?.refresh()
             self?.startStateManager()
         }
     }
