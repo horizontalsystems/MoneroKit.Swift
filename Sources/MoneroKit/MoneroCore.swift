@@ -498,9 +498,14 @@ class MoneroCore {
         stateManager.state = .connecting(waiting: waiting)
     }
 
+    // On walletQueue so it cannot race stopCore, which nils the pointer under the same
+    // queue before closing the wallet: callers run on the global event queue (delegate
+    // callbacks generating extra addresses), which the close-path drains do not cover.
     func address(index: Int) -> String {
-        guard let walletPtr = walletPointer else { return "" }
-        return stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(index))) ?? ""
+        walletQueue.sync {
+            guard let walletPtr = walletPointer else { return "" }
+            return stringFromCString(MONERO_Wallet_address(walletPtr, UInt64(account), UInt64(index))) ?? ""
+        }
     }
 
     struct SendResult {
