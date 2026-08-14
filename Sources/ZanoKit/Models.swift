@@ -5,6 +5,20 @@ import Foundation
 /// Native ZANO asset ID
 public let ZanoAssetId = "d6329b5b1f7c0805b5c345f4957554002a2f557845f64d7645dae0e051a6498a"
 
+/// Mainnet asset ids of https://api.zano.org/assets_whitelist.json, pinned into the wallet's
+/// local whitelist on start so these assets stay visible even when the runtime global-whitelist
+/// fetch fails (endpoint down, DNS blocked, offline).
+public let GlobalWhitelistAssetIds = [
+    "93da681503353509367e241cda3234299dedbbad9ec851de31e900490807bf0c", // ETHX Wrapped Ethereum
+    "040a180aca4194a158c17945dd115db42086f6f074c1f77838621a4927fffa91", // BTCX Wrapped Bitcoin
+    "86143388bd056a8f0bab669f78f14873fac8e2dd8d57898cdb725a2d5e2e4f8f", // FUSD Freedom Dollar
+    "3de9ad7243afa49e0ade6839e97a9f10a527c4958ece2fc9cb1b87a44032167d", // BCHX Wrapped Bitcoin Cash
+    "bfa6609a94e39f418d9adb000f89edc7bd180fd120f1cd272201220e3070fb4f", // TONX Wrapped TON
+    "65b3bc549c8bc2c773781d5436f25f7af84644e61baaabd675d9867b007d17b4", // SOLX Wrapped Solana
+    "6ca3fa07f1b6a75b6e195d2918c32228765968b54ea691c75958affa1c4073fb", // BNBX Wrapped BNB
+    "24819c4b65786c3ac424e05d9ef4ab212de6222cc73bc5c4b012df5a3107eea4", // DAIX Wrapped Dai
+]
+
 // MARK: - Asset
 
 public struct AssetInfo: Equatable {

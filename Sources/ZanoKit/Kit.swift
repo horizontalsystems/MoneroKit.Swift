@@ -14,7 +14,10 @@ public class Kit {
 
     public weak var delegate: ZanoKitDelegate?
 
-    public init(wallet: ZanoWallet, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32? = nil) throws {
+    /// - Parameter pinnedAssetIds: asset ids added to the wallet's local whitelist once the daemon
+    ///   connection is up. Defaults to the bundled global-whitelist snapshot on mainnet (empty on
+    ///   testnet) so those assets stay visible when the wallet's runtime whitelist fetch fails.
+    public init(wallet: ZanoWallet, walletId: String, daemonAddress: String, networkType: NetworkType = .mainnet, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32? = nil, pinnedAssetIds: [String]? = nil) throws {
         let baseDirectoryName = "ZanoKit/\(walletId)/network_\(networkType.rawValue)"
         let baseDirectoryUrl = try FileHandler.directoryURL(for: baseDirectoryName)
 
@@ -39,6 +42,7 @@ public class Kit {
             logger: logger,
             zanoCoreLogLevel: zanoCoreLogLevel,
             storedCreationTimestamp: storage.getCreationTimestamp(),
+            pinnedAssetIds: pinnedAssetIds ?? (networkType == .mainnet ? GlobalWhitelistAssetIds : []),
             onFirstRestore: { [weak storage] timestamp in
                 storage?.saveCreationTimestamp(timestamp)
             }
@@ -249,6 +253,34 @@ public class Kit {
 
     public func estimateFee(priority: SendPriority = .default) -> UInt64 {
         ZanoWalletAPI.estimateFee(priority: UInt64(priority.rawValue))
+    }
+
+    // MARK: - Asset Whitelist
+
+    /// Adds an asset to the wallet's local whitelist so its balance and transactions start being
+    /// reported, resolving the descriptor from the daemon. Requires the kit to be started and the
+    /// daemon reachable. Returns the resolved descriptor when the daemon provides one.
+    @discardableResult
+    public func addAssetToWhitelist(assetId: String) throws -> AssetInfo? {
+        try zanoCore.addAssetToWhitelist(assetId: assetId).map { AssetInfo(asset: Asset(
+            assetId: $0.assetId,
+            ticker: $0.ticker,
+            fullName: $0.fullName,
+            decimalPoint: $0.decimalPoint,
+            totalMaxSupply: $0.totalMaxSupply,
+            currentSupply: $0.currentSupply,
+            metaInfo: $0.metaInfo
+        )) }
+    }
+
+    public func removeAssetFromWhitelist(assetId: String) throws {
+        try zanoCore.removeAssetFromWhitelist(assetId: assetId)
+    }
+
+    /// Queues an asset id for whitelist pinning, retrying until the daemon confirms.
+    /// Unlike addAssetToWhitelist, safe to call before the connection is up.
+    public func pinAssetToWhitelist(assetId: String) {
+        zanoCore.pinAssetToWhitelist(assetId: assetId)
     }
 }
 

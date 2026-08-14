@@ -32,6 +32,15 @@ class ZanoCore {
     private var balances: [AssetBalance] = []
     private var transactions: [Transaction] = []
 
+    // Asset ids not yet confirmed in the wallet's local whitelist this session.
+    // assets_whitelist_add resolves the descriptor from the daemon, so attempts only make
+    // sense once the connection is up; failed ids are retried on later sync-state emissions.
+    // Successful adds persist in the wallet file.
+    private let pinLock = NSLock()
+    private var pendingPinAssetIds: Set<String> = []
+    private var pinInProgress = false
+    private let pinnedAssetIds: [String]
+
     /// Update assets only if changed, then notify delegate
     private func updateAssets(_ newAssets: [Asset]) {
         guard assets != newAssets else { return }
@@ -72,7 +81,7 @@ class ZanoCore {
         stateManager.blockHeights
     }
 
-    init(wallet: ZanoWallet, walletPath: String, workingDir: String, walletPassword: String, daemonAddress: String, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32?, storedCreationTimestamp: UInt64?, onFirstRestore: ((UInt64) -> Void)?) {
+    init(wallet: ZanoWallet, walletPath: String, workingDir: String, walletPassword: String, daemonAddress: String, networkType: NetworkType, reachabilityManager: ReachabilityManager, logger: Logger?, zanoCoreLogLevel: Int32?, storedCreationTimestamp: UInt64?, pinnedAssetIds: [String], onFirstRestore: ((UInt64) -> Void)?) {
         self.wallet = wallet
         self.walletPath = walletPath
         self.workingDir = workingDir
@@ -82,6 +91,7 @@ class ZanoCore {
         self.logger = logger
         self.zanoCoreLogLevel = zanoCoreLogLevel ?? 0
         self.storedCreationTimestamp = storedCreationTimestamp
+        self.pinnedAssetIds = pinnedAssetIds
         self.onFirstRestore = onFirstRestore
         api = ZanoWalletAPI(logger: logger)
 
@@ -276,6 +286,99 @@ class ZanoCore {
         updateBalances(parsedBalances)
     }
 
+    // MARK: - Asset Whitelist
+
+    /// Adds an asset to the wallet's local whitelist, resolving its descriptor from the daemon.
+    /// Local-whitelist assets stay visible in getbalance even when the wallet's runtime fetch of
+    /// the global whitelist (api.zano.org) fails. Successful adds persist in the wallet file.
+    func addAssetToWhitelist(assetId: String) throws -> Asset? {
+        guard let wid = walletId else {
+            throw ZanoCoreError.walletNotInitialized
+        }
+
+        let (result, error) = api.parseResponse(api.invoke(walletId: wid, method: "assets_whitelist_add", params: ["asset_id": assetId]))
+
+        if let error {
+            throw ZanoCoreError.walletStatusError("\(error.code) - \(error.message)")
+        }
+
+        guard let result else {
+            throw ZanoCoreError.walletStatusError("Empty assets_whitelist_add response")
+        }
+
+        if let status = result["status"] as? String, status != "OK" {
+            throw ZanoCoreError.walletStatusError("assets_whitelist_add status: \(status)")
+        }
+
+        guard let descriptor = result["asset_descriptor"] as? [String: Any] else {
+            return nil
+        }
+
+        return Asset(
+            assetId: assetId,
+            ticker: descriptor["ticker"] as? String ?? "",
+            fullName: descriptor["full_name"] as? String ?? "",
+            decimalPoint: descriptor["decimal_point"] as? Int ?? 12,
+            totalMaxSupply: (descriptor["total_max_supply"] as? NSNumber)?.uint64Value ?? 0,
+            currentSupply: (descriptor["current_supply"] as? NSNumber)?.uint64Value ?? 0,
+            metaInfo: descriptor["meta_info"] as? String
+        )
+    }
+
+    func removeAssetFromWhitelist(assetId: String) throws {
+        guard let wid = walletId else {
+            throw ZanoCoreError.walletNotInitialized
+        }
+
+        let (_, error) = api.parseResponse(api.invoke(walletId: wid, method: "assets_whitelist_remove", params: ["asset_id": assetId]))
+        if let error {
+            throw ZanoCoreError.walletStatusError("\(error.code) - \(error.message)")
+        }
+    }
+
+    /// Queues an asset id for pinning with the same retry semantics as the initial list:
+    /// attempted now and re-attempted on later sync-state emissions until the daemon confirms.
+    func pinAssetToWhitelist(assetId: String) {
+        pinLock.lock()
+        pendingPinAssetIds.insert(assetId)
+        pinLock.unlock()
+
+        pinAssetsToWhitelist()
+    }
+
+    private func pinAssetsToWhitelist() {
+        pinLock.lock()
+        let shouldRun = !pendingPinAssetIds.isEmpty && !pinInProgress
+        if shouldRun { pinInProgress = true }
+        pinLock.unlock()
+
+        guard shouldRun else { return }
+
+        walletQueue.async { [weak self] in
+            guard let self else { return }
+            defer {
+                pinLock.lock()
+                pinInProgress = false
+                pinLock.unlock()
+            }
+
+            pinLock.lock()
+            let snapshot = Array(pendingPinAssetIds)
+            pinLock.unlock()
+
+            for assetId in snapshot {
+                do {
+                    _ = try addAssetToWhitelist(assetId: assetId)
+                    pinLock.lock()
+                    pendingPinAssetIds.remove(assetId)
+                    pinLock.unlock()
+                } catch {
+                    logger?.debug("Pinning asset \(assetId) to whitelist failed: \(error)")
+                }
+            }
+        }
+    }
+
     private func onSyncStateChanged() {
         globalEventQueue.async { [weak self] in
             guard let self else { return }
@@ -286,12 +389,14 @@ class ZanoCore {
         case .connecting, .notSynced: ()
 
         case .synced:
+            pinAssetsToWhitelist()
             walletQueue.async { [weak self] in
                 self?._refresh()
                 self?.storeWallet()
             }
 
         case .syncing:
+            pinAssetsToWhitelist()
             if stateManager.chunkOfBlocksSynced {
                 walletQueue.async { [weak self] in
                     self?._refresh()
@@ -364,7 +469,9 @@ class ZanoCore {
             "update_provision_info": true,
         ]
 
-        guard let resultJson = api.invoke(walletId: wid, method: "get_recent_txs_and_info", params: params) else {
+        // v3: the v1 call is legacy — its entries carry only the native-coin amount/is_income
+        // and no per-asset subtransfers, so confidential asset transfers are invisible.
+        guard let resultJson = api.invoke(walletId: wid, method: "get_recent_txs_and_info3", params: params) else {
             logger?.debug("Fetch transactions: no response (wallet may be busy)")
             return
         }
@@ -387,7 +494,6 @@ class ZanoCore {
             for tx in transfers {
                 guard let txHash = tx["tx_hash"] as? String else { continue }
 
-                let isIncome = tx["is_income"] as? Bool ?? false
                 let fee = (tx["fee"] as? NSNumber)?.uint64Value ?? 0
                 let height = (tx["height"] as? NSNumber)?.uint64Value ?? 0
                 let timestamp = tx["timestamp"] as? Int ?? 0
@@ -427,6 +533,14 @@ class ZanoCore {
                     // Older cores served a flat list; keep reading it so a downgrade still works.
                     subtransfers = flat
                 }
+
+                // v3 has no top-level is_income; mirror the legacy semantic (the native
+                // subtransfer's flag), falling back to the top-level field for old cores.
+                let nativeSubtransfer = subtransfers.first { subtransfer in
+                    let assetId = subtransfer["asset_id"] as? String
+                    return assetId == nil || assetId!.isEmpty || assetId == ZanoAssetId
+                }
+                let isIncome = nativeSubtransfer?["is_income"] as? Bool ?? (tx["is_income"] as? Bool ?? false)
 
                 // Merge legs by asset, netting opposing directions, before creating records.
                 // Transaction's primary key is (hash, assetId), so the same asset appearing
@@ -621,6 +735,11 @@ class ZanoCore {
     func start() throws {
         try initializeLibrary()
         try openOrRestoreWallet()
+
+        pinLock.lock()
+        pendingPinAssetIds = Set(pinnedAssetIds)
+        pinLock.unlock()
+
         stateManager.validateReachable()
         startWalletServices()
     }
