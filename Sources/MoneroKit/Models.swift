@@ -65,6 +65,21 @@ public enum SendPriority: Int, CaseIterable {
     case `default`, low, medium, high
 }
 
+public struct UnspentOutput {
+    public let keyImage: String
+    public let txHash: String
+    public let amount: UInt64
+    public let accountIndex: UInt32
+    public let subaddressIndex: UInt32
+    public let blockHeight: UInt64
+    public let frozen: Bool
+    public let unlocked: Bool
+
+    public var spendable: Bool {
+        unlocked && !frozen
+    }
+}
+
 public enum NetworkType: Int32, CaseIterable {
     case mainnet = 0
     case testnet = 1

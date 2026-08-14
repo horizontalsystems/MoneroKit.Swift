@@ -7,6 +7,7 @@ public enum MoneroCoreError: Error {
     case daemonInitFailed(String)
     case walletStatusError(String?)
     case insufficientFunds(String)
+    case invalidSelectedInputs(String)
     case transactionEstimationFailed(String)
     case transactionSendFailed(String)
     case transactionCommitFailed(String)

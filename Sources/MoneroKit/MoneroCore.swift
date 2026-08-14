@@ -446,13 +446,114 @@ class MoneroCore {
         let recipientAddress: String
     }
 
-    func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil) throws -> SendResult {
+    // Enumerates the wallet's outputs for the current account. Coins::refresh acquires the
+    // wallet2 mutex, which the background refresh thread can hold for seconds - never call
+    // from the main thread.
+    private func fetchOutputs(walletPointer: UnsafeMutableRawPointer, includeSpent: Bool) -> [(output: UnspentOutput, spent: Bool)] {
+        guard let coinsPtr = MONERO_Wallet_coins(walletPointer) else { return [] }
+        MONERO_Coins_refresh(coinsPtr)
+
+        var outputs: [(UnspentOutput, Bool)] = []
+        let count = MONERO_Coins_count(coinsPtr)
+
+        for i in 0 ..< count {
+            guard let coinPtr = MONERO_Coins_coin(coinsPtr, i) else { continue }
+
+            let spent = MONERO_CoinsInfo_spent(coinPtr)
+            guard includeSpent || !spent else { continue }
+
+            guard MONERO_CoinsInfo_subaddrAccount(coinPtr) == account,
+                  MONERO_CoinsInfo_keyImageKnown(coinPtr),
+                  let keyImage = stringFromCString(MONERO_CoinsInfo_keyImage(coinPtr)), !keyImage.isEmpty
+            else { continue }
+
+            let output = UnspentOutput(
+                keyImage: keyImage,
+                txHash: stringFromCString(MONERO_CoinsInfo_hash(coinPtr)) ?? "",
+                amount: MONERO_CoinsInfo_amount(coinPtr),
+                accountIndex: MONERO_CoinsInfo_subaddrAccount(coinPtr),
+                subaddressIndex: MONERO_CoinsInfo_subaddrIndex(coinPtr),
+                blockHeight: MONERO_CoinsInfo_blockHeight(coinPtr),
+                frozen: MONERO_CoinsInfo_frozen(coinPtr),
+                unlocked: MONERO_CoinsInfo_unlocked(coinPtr)
+            )
+
+            outputs.append((output, spent))
+        }
+
+        return outputs
+    }
+
+    func unspentOutputs() throws -> [UnspentOutput] {
+        try walletQueue.sync {
+            guard let walletPtr = walletPointer else {
+                throw MoneroCoreError.walletNotInitialized
+            }
+
+            return fetchOutputs(walletPointer: walletPtr, includeSpent: false).map(\.output)
+        }
+    }
+
+    private func logOutputs(_ label: String, _ outputs: [UnspentOutput]) {
+        let lines = outputs.map { output in
+            "  ki=\(output.keyImage) amount=\(output.amount) tx=\(output.txHash) subaddr=\(output.accountIndex)/\(output.subaddressIndex) height=\(output.blockHeight) unlocked=\(output.unlocked) frozen=\(output.frozen)"
+        }
+        logger?.info("\(label) (\(outputs.count)):\n\(lines.joined(separator: "\n"))")
+    }
+
+    private func validateSelection(keyImages: [String], among outputs: [UnspentOutput], amount: SendAmount) throws {
+        let outputsByKeyImage = Dictionary(uniqueKeysWithValues: outputs.map { ($0.keyImage, $0) })
+        var selectedSum: UInt64 = 0
+
+        for keyImage in keyImages {
+            guard let output = outputsByKeyImage[keyImage] else {
+                throw MoneroCoreError.invalidSelectedInputs("Unknown or spent output: \(keyImage)")
+            }
+            guard output.unlocked else {
+                throw MoneroCoreError.invalidSelectedInputs("Output is still locked: \(keyImage)")
+            }
+            guard !output.frozen else {
+                throw MoneroCoreError.invalidSelectedInputs("Output is frozen: \(keyImage)")
+            }
+            selectedSum += output.amount
+        }
+
+        if case .value = amount, amount.value > selectedSum {
+            throw MoneroCoreError.insufficientFunds("Selected outputs hold \(selectedSum), sent amount \(amount.value)")
+        }
+    }
+
+    func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil, selectedKeyImages: [String]? = nil) throws -> SendResult {
         guard let walletPtr = walletPointer else {
             throw MoneroCoreError.walletNotInitialized
         }
 
+        // The candidate set before the send, so the post-commit diff below can show which
+        // outputs wallet2 actually consumed.
+        let outputsBefore = fetchOutputs(walletPointer: walletPtr, includeSpent: false).map(\.output)
+        logOutputs("UTXOs available before send", outputsBefore)
+
+        var preferredInputs = ""
+        var resolvedAmount = amount
+
+        if let selectedKeyImages, !selectedKeyImages.isEmpty {
+            try validateSelection(keyImages: selectedKeyImages, among: outputsBefore, amount: amount)
+
+            let selected = outputsBefore.filter { selectedKeyImages.contains($0.keyImage) }
+            logOutputs("UTXOs selected for send", selected)
+
+            // Spending the exact sum of the selection is a sweep of those outputs: the fee
+            // must come out of the amount, which only create_transactions_all supports.
+            let selectedSum = selected.reduce(0) { $0 + $1.amount }
+            if case .value = amount, amount.value == selectedSum {
+                resolvedAmount = .all
+            }
+
+            preferredInputs = selectedKeyImages.joined(separator: ",")
+        }
+
         let cAddress = (address as NSString).utf8String
-        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", amount.value, 0, Int32(priority.rawValue), account, "", "")
+        let pendingTxPtr = MONERO_Wallet_createTransaction(walletPtr, cAddress, "", resolvedAmount.value, 0, Int32(priority.rawValue), account, preferredInputs, ",")
 
         guard let txPtr = pendingTxPtr else {
             let error = stringFromCString(MONERO_Wallet_errorString(walletPtr)) ?? "Unknown transaction creation error"
@@ -484,6 +585,14 @@ class MoneroCore {
                 MONERO_Wallet_setUserNote(walletPtr, cTxId, memo)
             }
         }
+
+        // Which outputs the committed transaction actually consumed: candidates from before
+        // the send that wallet2 now marks as spent.
+        let candidateKeyImages = Set(outputsBefore.map(\.keyImage))
+        let spentNow = fetchOutputs(walletPointer: walletPtr, includeSpent: true)
+            .filter { $0.spent && candidateKeyImages.contains($0.output.keyImage) }
+            .map(\.output)
+        logOutputs("UTXOs spent by this transaction", spentNow)
 
         startStateManager()
         return SendResult(txHashes: txIdArray, txKeys: txKeyArray, recipientAddress: address)

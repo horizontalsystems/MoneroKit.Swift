@@ -259,8 +259,14 @@ public class Kit {
         lifecycleQueue.async { [weak self] in self?._restart() }
     }
 
-    @discardableResult public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?) throws -> [String] {
-        let result = try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo)
+    /// Outputs spendable by the active account. Enumeration takes the wallet2 mutex, which the
+    /// background refresh thread can hold for seconds - do not call from the main thread.
+    public func unspentOutputs() throws -> [UnspentOutput] {
+        try moneroCore.unspentOutputs()
+    }
+
+    @discardableResult public func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String?, selectedKeyImages: [String]? = nil) throws -> [String] {
+        let result = try moneroCore.send(to: address, amount: amount, priority: priority, memo: memo, selectedKeyImages: selectedKeyImages)
 
         for (index, txHash) in result.txHashes.enumerated() {
             if index < result.txKeys.count {
