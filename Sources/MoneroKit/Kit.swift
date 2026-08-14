@@ -48,9 +48,9 @@ public class Kit {
 
         moneroCore.delegate = self
 
-        if storage.getAllAddresses().isEmpty {
+        if storage.getAllAddresses(accountIndex: Int(account)).isEmpty {
             let primaryAddress = try MoneroCore.address(wallet: wallet, account: account, index: 0, networkType: networkType)
-            storage.add(subAddress: SubAddress(address: primaryAddress, index: 0))
+            storage.add(subAddress: SubAddress(address: primaryAddress, index: 0, accountIndex: Int(account)))
 
             if account == 0 {
                 if case .watch = wallet {
@@ -58,7 +58,7 @@ public class Kit {
                 }
 
                 let firstSubAddress = try MoneroCore.address(wallet: wallet, account: account, index: 1, networkType: networkType)
-                storage.add(subAddress: SubAddress(address: firstSubAddress, index: 1))
+                storage.add(subAddress: SubAddress(address: firstSubAddress, index: 1, accountIndex: Int(account)))
             }
         }
 
@@ -144,11 +144,53 @@ public class Kit {
     }
 
     public var receiveAddress: String {
-        storage.getLastUnusedAddress()?.address ?? ""
+        storage.getLastUnusedAddress(accountIndex: Int(activeAccount))?.address ?? ""
     }
 
     public var usedAddresses: [SubAddress] {
-        storage.getAllAddresses()
+        storage.getAllAddresses(accountIndex: Int(activeAccount))
+    }
+
+    public var activeAccount: UInt32 {
+        moneroCore.account
+    }
+
+    public var accounts: [AccountInfo] {
+        storage.getAccounts().map {
+            AccountInfo(index: UInt32($0.index), label: $0.label, balance: BalanceInfo(all: $0.all, unlocked: $0.unlocked))
+        }
+    }
+
+    /// Switches which account balances, addresses and transactions are reported for.
+    /// The wallet scans all accounts in a single refresh pass, so no restart or rescan happens.
+    public func setActiveAccount(_ index: UInt32) {
+        guard index != moneroCore.account else { return }
+
+        moneroCore.setActiveAccount(index)
+
+        // Re-emit the stored balance of the new account right away; the refresh triggered
+        // by the switch confirms it against the wallet shortly after.
+        let stored = storage.getAccounts().first { $0.index == Int(index) }
+        let balanceRecord = Balance(all: UInt64(clamping: stored?.all ?? 0), unlocked: UInt64(clamping: stored?.unlocked ?? 0))
+        storage.update(balance: balanceRecord)
+        delegate?.balanceDidChange(balanceInfo: BalanceInfo(balance: balanceRecord))
+
+        // Make sure the account has at least its primary address so receiveAddress works
+        // before the first refresh completes.
+        if storage.getAllAddresses(accountIndex: Int(index)).isEmpty {
+            let primaryAddress = moneroCore.address(index: 0)
+            if !primaryAddress.isEmpty {
+                storage.add(subAddress: SubAddress(address: primaryAddress, index: 0, accountIndex: Int(index)))
+            }
+        }
+    }
+
+    public func createAccount(label: String? = nil) throws -> AccountInfo {
+        try moneroCore.createAccount(label: label)
+    }
+
+    public func setAccountLabel(accountIndex: UInt32, label: String) throws {
+        try moneroCore.setAccountLabel(accountIndex: accountIndex, label: label)
     }
 
     public var statusInfo: [(String, Any)] {
@@ -175,7 +217,7 @@ public class Kit {
         }
 
         return storage
-            .transactions(fromTimestamp: resolvedTimestamp, descending: descending, type: type, limit: limit)
+            .transactions(fromTimestamp: resolvedTimestamp, descending: descending, type: type, limit: limit, accountIndex: Int(activeAccount))
             .map { TransactionInfo(transaction: $0, privateTxData: storage.getPrivateTxData(byHash: $0.hash)) }
     }
 
@@ -292,8 +334,8 @@ extension Kit: MoneroCoreDelegate {
         }
     }
 
-    func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress]) {
-        if moneroCore.account == 0, subAddresses.count <= 1 {
+    func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress], account: UInt32) {
+        if account == 0, subAddresses.count <= 1 {
             // 0 account must keep 2 addresses created on Kit initialization
             return
         } else if subAddresses.count == 0 {
@@ -301,9 +343,19 @@ extension Kit: MoneroCoreDelegate {
             return
         }
 
-        let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index) }
-        storage.update(subAddresses: subAddresses)
-        delegate?.subAddressesUpdated(subaddresses: subAddresses)
+        let subAddresses = subAddresses.map { SubAddress(address: $0.address, index: $0.index, accountIndex: Int($0.accountIndex)) }
+        storage.update(subAddresses: subAddresses, accountIndex: Int(account))
+
+        if account == moneroCore.account {
+            delegate?.subAddressesUpdated(subaddresses: subAddresses)
+        }
+    }
+
+    func accountsDidChange(accounts: [AccountInfo]) {
+        storage.update(accounts: accounts.map {
+            Account(index: Int($0.index), label: $0.label, all: UInt64(clamping: $0.balance.all), unlocked: UInt64(clamping: $0.balance.unlocked))
+        })
+        delegate?.accountsUpdated(accounts: accounts)
     }
 
     func balanceDidChange(balance: MoneroCore.Balance) {
@@ -319,7 +371,7 @@ extension Kit: MoneroCoreDelegate {
 
             if type == .incoming,
                let subAddressIndex = transaction.subaddrIndices.first,
-               let address = storage.getAddress(index: subAddressIndex)
+               let address = storage.getAddress(index: subAddressIndex, accountIndex: Int(transaction.subaddrAccount))
             {
                 recipientAddress = address.address
             }
@@ -334,33 +386,41 @@ extension Kit: MoneroCoreDelegate {
                 isFailed: transaction.isFailed,
                 timestamp: Int(transaction.timestamp.timeIntervalSince1970),
                 note: transaction.note,
-                recipientAddress: recipientAddress
+                recipientAddress: recipientAddress,
+                accountIndex: Int(transaction.subaddrAccount)
             )
         }
 
         storage.update(transactions: transactionRecords)
 
-        let transactionInfos = transactionRecords.map { TransactionInfo(transaction: $0, privateTxData: storage.getPrivateTxData(byHash: $0.hash)) }
+        let activeAccount = Int(moneroCore.account)
+        let transactionInfos = transactionRecords
+            .filter { $0.accountIndex == activeAccount }
+            .map { TransactionInfo(transaction: $0, privateTxData: storage.getPrivateTxData(byHash: $0.hash)) }
         delegate?.transactionsUpdated(inserted: [], updated: transactionInfos)
 
-        // Mark used addresses
-        var usedAddresses: [Int: Int] = Dictionary()
+        // Mark used addresses, per account
+        var usedAddresses: [Int: [Int: Int]] = [:]
         for transaction in transactions {
             guard transaction.direction == .in else { continue }
             for index in transaction.subaddrIndices {
-                usedAddresses[index] = (usedAddresses[index] ?? 0) + 1
+                usedAddresses[Int(transaction.subaddrAccount), default: [:]][index, default: 0] += 1
             }
         }
 
-        for (index, txCount) in usedAddresses {
-            storage.setAddressTransactionsCount(index: index, txCount: txCount)
+        for (accountIndex, counts) in usedAddresses {
+            for (index, txCount) in counts {
+                storage.setAddressTransactionsCount(index: index, accountIndex: accountIndex, txCount: txCount)
+            }
         }
 
-        // Generate extra unused addresses
-        if let lastUsedAddressIndex = usedAddresses.keys.max() {
+        // Generate extra unused addresses for the active account
+        if let lastUsedAddressIndex = usedAddresses[activeAccount]?.keys.max() {
             // We assume that there's at least 2 addresses in storage. Even if there's no transactions.
             let extraAddress = moneroCore.address(index: lastUsedAddressIndex + 1)
-            storage.add(subAddress: SubAddress(address: extraAddress, index: lastUsedAddressIndex + 1))
+            if !extraAddress.isEmpty {
+                storage.add(subAddress: SubAddress(address: extraAddress, index: lastUsedAddressIndex + 1, accountIndex: activeAccount))
+            }
         }
     }
 }
@@ -405,4 +465,10 @@ public protocol MoneroKitDelegate: AnyObject {
     func subAddressesUpdated(subaddresses: [SubAddress])
     func transactionsUpdated(inserted: [TransactionInfo], updated: [TransactionInfo])
     func walletStateDidChange(state: WalletState)
+    func accountsUpdated(accounts: [AccountInfo])
+}
+
+public extension MoneroKitDelegate {
+    // Optional: only delegates interested in multi-account state need to implement it.
+    func accountsUpdated(accounts _: [AccountInfo]) {}
 }

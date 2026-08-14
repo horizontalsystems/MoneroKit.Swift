@@ -32,11 +32,13 @@ class MoneroCore {
         }
     }
 
-    private var subAddresses: [SubAddress] = [] {
+    private var accounts: [AccountInfo] = [] {
         didSet {
             globalEventQueue.async { [weak self] in
                 guard let self else { return }
-                delegate?.subAddresssesDidChange(subAddresses: subAddresses)
+                if oldValue != accounts {
+                    delegate?.accountsDidChange(accounts: accounts)
+                }
             }
         }
     }
@@ -241,23 +243,45 @@ class MoneroCore {
         _ = MONERO_Wallet_store(walletPointer, cWalletPath)
     }
 
-    private func updateBalance(walletPointer: UnsafeMutableRawPointer) {
+    private func updateBalance(walletPointer: UnsafeMutableRawPointer, account: UInt32) {
         let allBalance = MONERO_Wallet_balance(walletPointer, account)
         let unlocked = MONERO_Wallet_unlockedBalance(walletPointer, account)
         balance = Balance(all: allBalance, unlocked: unlocked)
     }
 
-    private func fetchSubaddresses(walletPointer: UnsafeMutableRawPointer) {
+    private func fetchSubaddresses(walletPointer: UnsafeMutableRawPointer, account: UInt32) {
         var fetchedAddresses: [SubAddress] = []
         let count = MONERO_Wallet_numSubaddresses(walletPointer, account)
 
         for i in 0 ..< count {
             if let address = stringFromCString(MONERO_Wallet_address(walletPointer, UInt64(account), UInt64(i))) {
-                fetchedAddresses.append(.init(address: address, index: i))
+                fetchedAddresses.append(.init(address: address, index: i, accountIndex: account))
             }
         }
 
-        subAddresses = fetchedAddresses
+        globalEventQueue.async { [weak self] in
+            guard let self else { return }
+            delegate?.subAddresssesDidChange(subAddresses: fetchedAddresses, account: account)
+        }
+    }
+
+    private func updateAccounts(walletPointer: UnsafeMutableRawPointer) {
+        let count = MONERO_Wallet_numSubaddressAccounts(walletPointer)
+        var fetchedAccounts: [AccountInfo] = []
+
+        for i in 0 ..< UInt32(count) {
+            var label = stringFromCString(MONERO_Wallet_getSubaddressLabel(walletPointer, i, 0))
+            if let _label = label, _label.isEmpty { label = nil }
+
+            let balance = BalanceInfo(
+                all: Int64(clamping: MONERO_Wallet_balance(walletPointer, i)),
+                unlocked: Int64(clamping: MONERO_Wallet_unlockedBalance(walletPointer, i))
+            )
+
+            fetchedAccounts.append(AccountInfo(index: i, label: label, balance: balance))
+        }
+
+        accounts = fetchedAccounts
     }
 
     private func fetchTransactions(walletPointer: UnsafeMutableRawPointer) {
@@ -303,9 +327,9 @@ class MoneroCore {
                 note: note
             )
 
-            if transaction.subaddrAccount == account {
-                fetchedTransactions.append(transaction)
-            }
+            // All accounts' transactions are kept; scoping to the active account happens
+            // at query time in storage.
+            fetchedTransactions.append(transaction)
         }
 
         transactions = fetchedTransactions.sorted(by: { $0.timestamp > $1.timestamp })
@@ -424,10 +448,45 @@ class MoneroCore {
     func refresh() {
         walletQueue.async { [weak self] in
             guard let self, let walletPtr = walletPointer else { return }
-            updateBalance(walletPointer: walletPtr)
-            fetchSubaddresses(walletPointer: walletPtr)
+            let account = account
+            updateBalance(walletPointer: walletPtr, account: account)
+            fetchSubaddresses(walletPointer: walletPtr, account: account)
             fetchTransactions(walletPointer: walletPtr)
+            updateAccounts(walletPointer: walletPtr)
             storeWallet(walletPointer: walletPtr)
+        }
+    }
+
+    func setActiveAccount(_ index: UInt32) {
+        account = index
+        refresh()
+    }
+
+    func createAccount(label: String?) throws -> AccountInfo {
+        try walletQueue.sync {
+            guard let walletPtr = walletPointer else {
+                throw MoneroCoreError.walletNotInitialized
+            }
+
+            MONERO_Wallet_addSubaddressAccount(walletPtr, label ?? "")
+            let newIndex = UInt32(MONERO_Wallet_numSubaddressAccounts(walletPtr)) - 1
+            storeWallet(walletPointer: walletPtr)
+            updateAccounts(walletPointer: walletPtr)
+
+            return AccountInfo(index: newIndex, label: label, balance: BalanceInfo(all: 0, unlocked: 0))
+        }
+    }
+
+    func setAccountLabel(accountIndex: UInt32, label: String) throws {
+        try walletQueue.sync {
+            guard let walletPtr = walletPointer else {
+                throw MoneroCoreError.walletNotInitialized
+            }
+
+            // Account labels are the (account, 0) subaddress label, persisted in the wallet cache.
+            MONERO_Wallet_setSubaddressLabel(walletPtr, accountIndex, 0, label)
+            storeWallet(walletPointer: walletPtr)
+            updateAccounts(walletPointer: walletPtr)
         }
     }
 
@@ -636,6 +695,7 @@ class MoneroCore {
     struct SubAddress {
         let address: String
         let index: Int
+        let accountIndex: UInt32
     }
 
     struct Balance: Equatable {
@@ -731,6 +791,7 @@ extension MoneroCore {
 protocol MoneroCoreDelegate: AnyObject {
     func balanceDidChange(balance: MoneroCore.Balance)
     func transactionsDidChange(transactions: [MoneroCore.Transaction])
-    func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress])
+    func subAddresssesDidChange(subAddresses: [MoneroCore.SubAddress], account: UInt32)
+    func accountsDidChange(accounts: [AccountInfo])
     func walletStateDidChange(state: WalletState)
 }

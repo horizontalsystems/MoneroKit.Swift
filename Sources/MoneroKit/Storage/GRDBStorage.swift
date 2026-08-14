@@ -86,6 +86,27 @@ class GrdbStorage {
             }
         }
 
+        // Pre-accounts databases only ever held account 0, so defaulting the new column to 0
+        // keeps existing wallets intact after the app updates.
+        migrator.registerMigration("addAccounts") { db in
+            try db.alter(table: Transaction.databaseTableName) { t in
+                t.add(column: Transaction.Columns.accountIndex.name, .integer).notNull().defaults(to: 0)
+            }
+
+            try db.alter(table: SubAddress.databaseTableName) { t in
+                t.add(column: SubAddress.Columns.accountIndex.name, .integer).notNull().defaults(to: 0)
+            }
+
+            try db.create(table: Account.databaseTableName) { t in
+                t.column(Account.Columns.index.name, .integer).notNull()
+                t.column(Account.Columns.label.name, .text)
+                t.column(Account.Columns.all.name, .integer).notNull()
+                t.column(Account.Columns.unlocked.name, .integer).notNull()
+
+                t.primaryKey([Account.Columns.index.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 
@@ -96,6 +117,7 @@ class GrdbStorage {
             try BlockHeights.deleteAll(db)
             try SubAddress.deleteAll(db)
             try PrivateTxData.deleteAll(db)
+            try Account.deleteAll(db)
         }
     }
 
@@ -105,9 +127,11 @@ class GrdbStorage {
         }
     }
 
-    func transactions(fromTimestamp: Int?, descending: Bool, type: TransactionFilterType?, limit: Int?) -> [Transaction] {
+    func transactions(fromTimestamp: Int?, descending: Bool, type: TransactionFilterType?, limit: Int?, accountIndex: Int) -> [Transaction] {
         try! dbPool.read { db in
-            var query = Transaction.order(descending ? Transaction.Columns.timestamp.desc : Transaction.Columns.timestamp.asc)
+            var query = Transaction
+                .filter(Transaction.Columns.accountIndex == accountIndex)
+                .order(descending ? Transaction.Columns.timestamp.desc : Transaction.Columns.timestamp.asc)
 
             if let fromTimestamp {
                 query = query.filter(descending ? Transaction.Columns.timestamp < fromTimestamp : Transaction.Columns.timestamp > fromTimestamp)
@@ -135,9 +159,11 @@ class GrdbStorage {
         }
     }
 
-    func update(subAddresses: [SubAddress]) {
+    // Scoped to one account so a refresh of the active account cannot wipe the
+    // other accounts' addresses.
+    func update(subAddresses: [SubAddress], accountIndex: Int) {
         try! dbPool.write { db in
-            try SubAddress.deleteAll(db)
+            try SubAddress.filter(SubAddress.Columns.accountIndex == accountIndex).deleteAll(db)
             for subAddress in subAddresses {
                 try subAddress.insert(db)
             }
@@ -147,6 +173,21 @@ class GrdbStorage {
     func add(subAddress: SubAddress) {
         try! dbPool.write { db in
             try subAddress.insert(db)
+        }
+    }
+
+    func update(accounts: [Account]) {
+        try! dbPool.write { db in
+            try Account.deleteAll(db)
+            for account in accounts {
+                try account.insert(db)
+            }
+        }
+    }
+
+    func getAccounts() -> [Account] {
+        try! dbPool.read { db in
+            try Account.order(Account.Columns.index.asc).fetchAll(db)
         }
     }
 
@@ -170,27 +211,37 @@ class GrdbStorage {
         }
     }
 
-    func setAddressTransactionsCount(index: Int, txCount: Int) {
+    func setAddressTransactionsCount(index: Int, accountIndex: Int, txCount: Int) {
         _ = try! dbPool.write { db in
-            try SubAddress.filter(SubAddress.Columns.index == index).updateAll(db, [SubAddress.Columns.transactionsCount.set(to: txCount)])
+            try SubAddress
+                .filter(SubAddress.Columns.index == index && SubAddress.Columns.accountIndex == accountIndex)
+                .updateAll(db, [SubAddress.Columns.transactionsCount.set(to: txCount)])
         }
     }
 
-    func getLastUnusedAddress() -> SubAddress? {
+    func getLastUnusedAddress(accountIndex: Int) -> SubAddress? {
         try! dbPool.read { db in
-            try SubAddress.filter(SubAddress.Columns.transactionsCount == 0).order(SubAddress.Columns.index.desc).fetchOne(db)
+            try SubAddress
+                .filter(SubAddress.Columns.transactionsCount == 0 && SubAddress.Columns.accountIndex == accountIndex)
+                .order(SubAddress.Columns.index.desc)
+                .fetchOne(db)
         }
     }
 
-    func getAddress(index: Int) -> SubAddress? {
+    func getAddress(index: Int, accountIndex: Int) -> SubAddress? {
         try! dbPool.read { db in
-            try SubAddress.filter(SubAddress.Columns.index == index).fetchOne(db)
+            try SubAddress
+                .filter(SubAddress.Columns.index == index && SubAddress.Columns.accountIndex == accountIndex)
+                .fetchOne(db)
         }
     }
 
-    func getAllAddresses() -> [SubAddress] {
+    func getAllAddresses(accountIndex: Int) -> [SubAddress] {
         try! dbPool.read { db in
-            try SubAddress.order(SubAddress.Columns.index.asc).fetchAll(db)
+            try SubAddress
+                .filter(SubAddress.Columns.accountIndex == accountIndex)
+                .order(SubAddress.Columns.index.asc)
+                .fetchAll(db)
         }
     }
 

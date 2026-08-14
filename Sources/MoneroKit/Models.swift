@@ -24,6 +24,7 @@ public struct TransactionInfo {
     public let memo: String?
     public let txKey: String?
     public let recipientAddress: String?
+    public let accountIndex: Int
 
     init(transaction: Transaction, privateTxData: PrivateTxData? = nil) {
         uid = transaction.uid
@@ -38,6 +39,7 @@ public struct TransactionInfo {
         memo = transaction.note
         txKey = privateTxData?.txKey
         recipientAddress = transaction.recipientAddress ?? privateTxData?.recipientAddress
+        accountIndex = transaction.accountIndex
     }
 }
 
@@ -63,6 +65,12 @@ public struct BalanceInfo: Equatable {
 
 public enum SendPriority: Int, CaseIterable {
     case `default`, low, medium, high
+}
+
+public struct AccountInfo: Equatable {
+    public let index: UInt32
+    public let label: String?
+    public let balance: BalanceInfo
 }
 
 public struct UnspentOutput {

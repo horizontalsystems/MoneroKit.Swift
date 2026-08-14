@@ -21,8 +21,9 @@ class Transaction: Record {
     var timestamp: Int
     var note: String?
     var recipientAddress: String?
+    var accountIndex: Int
 
-    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, note: String?, recipientAddress: String?) {
+    init(hash: String, type: TransactionType, blockHeight: UInt64, amount: Int64, fee: UInt64, isPending: Bool, isFailed: Bool, timestamp: Int, note: String?, recipientAddress: String?, accountIndex: Int = 0) {
         uid = UUID().uuidString
         self.hash = hash
         self.type = type
@@ -34,6 +35,7 @@ class Transaction: Record {
         self.timestamp = timestamp
         self.note = note
         self.recipientAddress = recipientAddress
+        self.accountIndex = accountIndex
 
         super.init()
     }
@@ -58,6 +60,7 @@ class Transaction: Record {
         case timestamp
         case note
         case recipientAddress
+        case accountIndex
     }
 
     required init(row: Row) throws {
@@ -72,6 +75,7 @@ class Transaction: Record {
         timestamp = row[Columns.timestamp]
         note = row[Columns.note]
         recipientAddress = row[Columns.recipientAddress]
+        accountIndex = row[Columns.accountIndex]
 
         try super.init(row: row)
     }
@@ -88,5 +92,6 @@ class Transaction: Record {
         container[Columns.timestamp] = timestamp
         container[Columns.note] = note
         container[Columns.recipientAddress] = recipientAddress
+        container[Columns.accountIndex] = accountIndex
     }
 }
