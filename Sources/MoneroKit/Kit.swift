@@ -173,7 +173,6 @@ public class Kit {
         let stored = storage.getAccounts().first { $0.index == Int(index) }
         let balanceRecord = Balance(all: UInt64(clamping: stored?.all ?? 0), unlocked: UInt64(clamping: stored?.unlocked ?? 0))
         storage.update(balance: balanceRecord)
-        delegate?.balanceDidChange(balanceInfo: BalanceInfo(balance: balanceRecord))
 
         // Make sure the account has at least its primary address so receiveAddress works
         // before the first refresh completes.
@@ -182,6 +181,15 @@ public class Kit {
             if !primaryAddress.isEmpty {
                 storage.add(subAddress: SubAddress(address: primaryAddress, index: 0, accountIndex: Int(index)))
             }
+        }
+
+        // Emissions ride the same serial event queue as every other delegate callback, so
+        // they can never overlap kit-driven emissions on another thread.
+        moneroCore.globalEventQueue.async { [weak self] in
+            guard let self else { return }
+            delegate?.balanceDidChange(balanceInfo: BalanceInfo(balance: balanceRecord))
+            delegate?.accountsUpdated(accounts: accounts)
+            delegate?.transactionsUpdated(inserted: [], updated: transactions(descending: true, type: nil, limit: nil))
         }
     }
 

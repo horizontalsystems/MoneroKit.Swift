@@ -6,7 +6,9 @@ import HsToolKit
 class MoneroCore {
     weak var delegate: MoneroCoreDelegate?
 
-    private let globalEventQueue = DispatchQueue.global(qos: .utility)
+    // Serial: delegate callbacks must never overlap - downstream Rx subjects are not
+    // built for concurrent emission, and ordering must be predictable.
+    let globalEventQueue = DispatchQueue(label: "io.horizontalsystems.monero_kit.event_queue", qos: .utility)
     private let walletQueue = DispatchQueue(label: "io.horizontalsystems.monero_kit.wallet_queue", qos: .utility)
 
     private var wallet: MoneroWallet
