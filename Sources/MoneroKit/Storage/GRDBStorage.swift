@@ -107,6 +107,31 @@ class GrdbStorage {
             }
         }
 
+        // An inter-account transfer produces two history entries with the same hash - one
+        // outgoing leg on the source account, one incoming on the destination. A hash-only
+        // key made the second insert overwrite the first. The table is a cache of wallet2
+        // state (fully rebuilt on every refresh), so it is dropped rather than migrated.
+        migrator.registerMigration("transactionsPerAccountKey") { db in
+            try db.drop(table: Transaction.databaseTableName)
+
+            try db.create(table: Transaction.databaseTableName) { t in
+                t.column(Transaction.Columns.uid.name, .text).notNull()
+                t.column(Transaction.Columns.hash.name, .text).notNull()
+                t.column(Transaction.Columns.type.name, .integer).notNull()
+                t.column(Transaction.Columns.blockHeight.name, .integer).notNull()
+                t.column(Transaction.Columns.amount.name, .integer).notNull()
+                t.column(Transaction.Columns.fee.name, .integer).notNull()
+                t.column(Transaction.Columns.isPending.name, .boolean).notNull()
+                t.column(Transaction.Columns.isFailed.name, .boolean).notNull()
+                t.column(Transaction.Columns.timestamp.name, .integer).notNull()
+                t.column(Transaction.Columns.note.name, .text)
+                t.column(Transaction.Columns.recipientAddress.name, .text)
+                t.column(Transaction.Columns.accountIndex.name, .integer).notNull().defaults(to: 0)
+
+                t.primaryKey([Transaction.Columns.hash.name, Transaction.Columns.accountIndex.name], onConflict: .replace)
+            }
+        }
+
         return migrator
     }
 

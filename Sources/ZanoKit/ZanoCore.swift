@@ -293,7 +293,16 @@ class ZanoCore {
     /// Adds an asset to the wallet's local whitelist, resolving its descriptor from the daemon.
     /// Local-whitelist assets stay visible in getbalance even when the wallet's runtime fetch of
     /// the global whitelist (api.zano.org) fails. Successful adds persist in the wallet file.
+    /// Serialized on walletQueue so it cannot race stop(), which takes the wallet id under the
+    /// same queue before closing.
     func addAssetToWhitelist(assetId: String) throws -> Asset? {
+        try walletQueue.sync {
+            try _addAssetToWhitelist(assetId: assetId)
+        }
+    }
+
+    // Unqueued core for callers already on walletQueue (the pin loop).
+    private func _addAssetToWhitelist(assetId: String) throws -> Asset? {
         guard let wid = walletId else {
             throw ZanoCoreError.walletNotInitialized
         }
@@ -328,13 +337,15 @@ class ZanoCore {
     }
 
     func removeAssetFromWhitelist(assetId: String) throws {
-        guard let wid = walletId else {
-            throw ZanoCoreError.walletNotInitialized
-        }
+        try walletQueue.sync {
+            guard let wid = walletId else {
+                throw ZanoCoreError.walletNotInitialized
+            }
 
-        let (_, error) = api.parseResponse(api.invoke(walletId: wid, method: "assets_whitelist_remove", params: ["asset_id": assetId]))
-        if let error {
-            throw ZanoCoreError.walletStatusError("\(error.code) - \(error.message)")
+            let (_, error) = api.parseResponse(api.invoke(walletId: wid, method: "assets_whitelist_remove", params: ["asset_id": assetId]))
+            if let error {
+                throw ZanoCoreError.walletStatusError("\(error.code) - \(error.message)")
+            }
         }
     }
 
@@ -370,7 +381,7 @@ class ZanoCore {
 
             for assetId in snapshot {
                 do {
-                    _ = try addAssetToWhitelist(assetId: assetId)
+                    _ = try _addAssetToWhitelist(assetId: assetId)
                     pinLock.lock()
                     pendingPinAssetIds.remove(assetId)
                     pinLock.unlock()

@@ -189,6 +189,7 @@ public class Kit {
             guard let self else { return }
             delegate?.balanceDidChange(balanceInfo: BalanceInfo(balance: balanceRecord))
             delegate?.accountsUpdated(accounts: accounts)
+            delegate?.subAddressesUpdated(subaddresses: usedAddresses)
             delegate?.transactionsUpdated(inserted: [], updated: transactions(descending: true, type: nil, limit: nil))
         }
     }

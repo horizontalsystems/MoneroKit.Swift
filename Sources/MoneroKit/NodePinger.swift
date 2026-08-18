@@ -63,11 +63,12 @@ public enum NodePinger {
         let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
 
-        let start = Date()
+        // Monotonic clock: wall-clock Date() would corrupt a sample if NTP steps the clock
+        let start = DispatchTime.now()
 
         do {
             let (data, response) = try await session.data(for: request)
-            let elapsed = Date().timeIntervalSince(start)
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
 
             guard let httpResponse = response as? HTTPURLResponse, (200 ..< 300).contains(httpResponse.statusCode) else {
                 // The server answered, but the RPC is unusable (auth required, proxy error, ...).
@@ -90,6 +91,7 @@ public enum NodePinger {
                 responseTime: elapsed,
                 height: height,
                 majorVersion: majorVersion,
+                // 14 = the v0.15 consensus era; bump alongside future hard forks
                 isValid: height > 0 && majorVersion >= 14
             )
         } catch {

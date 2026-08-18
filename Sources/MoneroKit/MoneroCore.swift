@@ -16,6 +16,8 @@ class MoneroCore {
     private var walletListener: WalletListener
     private var networkType: NetworkType = .mainnet
     private var walletManagerPointer: UnsafeMutableRawPointer?
+    private let servicesStateLock = NSLock()
+    private var servicesStopped = false
     private var walletPointer: UnsafeMutableRawPointer?
     private var cWalletPath: UnsafeMutablePointer<CChar>?
     private var cWalletPassword: UnsafeMutablePointer<CChar>?
@@ -27,19 +29,19 @@ class MoneroCore {
 
     private var transactions: [Transaction] = [] {
         didSet {
+            let transactions = transactions
             globalEventQueue.async { [weak self] in
-                guard let self else { return }
-                delegate?.transactionsDidChange(transactions: transactions)
+                self?.delegate?.transactionsDidChange(transactions: transactions)
             }
         }
     }
 
     private var accounts: [AccountInfo] = [] {
         didSet {
+            let accounts = accounts
             globalEventQueue.async { [weak self] in
-                guard let self else { return }
                 if oldValue != accounts {
-                    delegate?.accountsDidChange(accounts: accounts)
+                    self?.delegate?.accountsDidChange(accounts: accounts)
                 }
             }
         }
@@ -47,10 +49,10 @@ class MoneroCore {
 
     private var balance: Balance = .init(all: 0, unlocked: 0) {
         didSet {
+            let balance = balance
             globalEventQueue.async { [weak self] in
-                guard let self else { return }
                 if oldValue != balance {
-                    delegate?.balanceDidChange(balance: balance)
+                    self?.delegate?.balanceDidChange(balance: balance)
                 }
             }
         }
@@ -82,13 +84,6 @@ class MoneroCore {
             self?.onSyncStateChanged()
         }
 
-        walletListener.onNewTransaction = { [weak self] in
-            // Refresh right away so an incoming (even unconfirmed) transaction surfaces
-            // immediately; the state poll alone only refreshes when the sync state changes,
-            // which can be a whole block time away.
-            self?.refresh()
-            self?.startStateManager()
-        }
     }
 
     deinit {
@@ -397,9 +392,27 @@ class MoneroCore {
     }
 
     private func startWalletServices() {
-        guard let walletPointer else { return }
+        servicesStateLock.lock()
+        let stopped = servicesStopped
+        servicesStateLock.unlock()
+
+        // The teardown drain must win: a reachability flip or listener tick observed
+        // mid-drain must not restart services while the wallet is about to close.
+        guard !stopped, let walletPointer else { return }
+
         stateManager.state = .connecting(waiting: false)
         startStateManager()
+
+        // Assigned here (not only at init) because both stop paths nil it out for teardown
+        // safety - without reassignment the instant-refresh behavior would die after the
+        // first background/foreground cycle.
+        walletListener.onNewTransaction = { [weak self] in
+            // Refresh right away so an incoming (even unconfirmed) transaction surfaces
+            // immediately; the state poll alone only refreshes when the sync state changes,
+            // which can be a whole block time away.
+            self?.refresh()
+            self?.startStateManager()
+        }
         walletListener.start(walletPointer: walletPointer)
     }
 
@@ -410,12 +423,24 @@ class MoneroCore {
 
     // Draining variant for the paths that go on to close or store the wallet:
     // waits until no poll/listener tick is still inside the C API. Listener first —
-    // its onNewTransaction callback can restart the state manager. Only safe from
+    // its onNewTransaction callback can restart the state manager. The reverse direction
+    // (the state manager's reachability sink reaching startWalletServices and restarting
+    // the already-drained listener) is closed by the servicesStopped flag. Only safe from
     // the lifecycle queue (the plain stopWalletServices is also called from the
     // reachability .idle handler, which runs on the state queue and must not sync).
     private func stopWalletServicesAndDrain() {
+        servicesStateLock.lock()
+        servicesStopped = true
+        servicesStateLock.unlock()
+
         walletListener.stopAndDrain()
         stateManager.stopAndDrain()
+    }
+
+    private func allowWalletServices() {
+        servicesStateLock.lock()
+        servicesStopped = false
+        servicesStateLock.unlock()
     }
 
     func start() throws {
@@ -424,6 +449,7 @@ class MoneroCore {
             return
         }
 
+        allowWalletServices()
         stateManager.validateReachable()
         try startCore()
         startWalletServices()
@@ -447,6 +473,7 @@ class MoneroCore {
     func resume() {
         guard let walletPtr = walletPointer else { return }
 
+        allowWalletServices()
         MONERO_Wallet_startRefresh(walletPtr)
         startWalletServices()
     }
@@ -593,7 +620,16 @@ class MoneroCore {
         }
     }
 
+    // Serialized on walletQueue: coin/history refreshes must not run concurrently with a
+    // polling refresh, and the pointer read must not race stopCore, which nils it under
+    // the same queue before closing the wallet.
     func send(to address: String, amount: SendAmount, priority: SendPriority = .default, memo: String? = nil, selectedKeyImages: [String]? = nil) throws -> SendResult {
+        try walletQueue.sync {
+            try _send(to: address, amount: amount, priority: priority, memo: memo, selectedKeyImages: selectedKeyImages)
+        }
+    }
+
+    private func _send(to address: String, amount: SendAmount, priority: SendPriority, memo: String?, selectedKeyImages: [String]?) throws -> SendResult {
         guard let walletPtr = walletPointer else {
             throw MoneroCoreError.walletNotInitialized
         }
@@ -606,7 +642,13 @@ class MoneroCore {
         var preferredInputs = ""
         var resolvedAmount = amount
 
-        if let selectedKeyImages, !selectedKeyImages.isEmpty {
+        if let selectedKeyImages {
+            // An explicitly empty selection must fail, not silently fall back to letting
+            // the wallet pick whatever inputs it likes.
+            guard !selectedKeyImages.isEmpty else {
+                throw MoneroCoreError.invalidSelectedInputs("No outputs selected")
+            }
+
             try validateSelection(keyImages: selectedKeyImages, among: outputsBefore, amount: amount)
 
             let selected = outputsBefore.filter { selectedKeyImages.contains($0.keyImage) }
@@ -669,6 +711,12 @@ class MoneroCore {
     }
 
     func estimateFee(address: String, amount: SendAmount, priority: SendPriority = .default) throws -> UInt64 {
+        try walletQueue.sync {
+            try _estimateFee(address: address, amount: amount, priority: priority)
+        }
+    }
+
+    private func _estimateFee(address: String, amount: SendAmount, priority: SendPriority) throws -> UInt64 {
         guard let walletPtr = walletPointer else {
             throw MoneroCoreError.walletNotInitialized
         }
