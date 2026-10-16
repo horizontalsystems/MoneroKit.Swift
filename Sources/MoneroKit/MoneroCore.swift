@@ -707,6 +707,10 @@ class MoneroCore {
         logOutputs("UTXOs spent by this transaction", spentNow)
 
         startStateManager()
+
+        // Refresh to update balance and transactions; refresh() dispatches onto walletQueue itself
+        refresh()
+
         return SendResult(txHashes: txIdArray, txKeys: txKeyArray, recipientAddress: address)
     }
 
